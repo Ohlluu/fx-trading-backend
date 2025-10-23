@@ -368,6 +368,13 @@ class ProTraderGold:
         breakout_candle = candles.iloc[breakout_candle_idx]
         candles_after_breakout = candles.iloc[breakout_candle_idx+1:]
 
+        # INVALIDATION CHECK: If any candle after breakout closed significantly below support, setup is dead
+        if len(candles_after_breakout) > 0:
+            for i, candle in candles_after_breakout.iterrows():
+                # If candle closed below support (not just wick, but actual close), setup is invalidated
+                if candle['close'] < key_level - 5:  # 5 pips buffer
+                    return {"detected": False}  # Setup invalidated
+
         # Check if price has come back to test the level
         retest_happening = False
         rejection_confirmed = False
