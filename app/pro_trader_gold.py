@@ -384,11 +384,16 @@ class ProTraderGold:
             wick_touched = current_candle['low'] <= key_level + 2
 
             if state == "REJECTION_WAITING":
+                # Calculate if early entry conditions are met
+                minutes_elapsed = 60 - current_candle['time_remaining']
+                price_holding_strong = current_price > key_level + 5
+                early_entry_available = wick_touched and minutes_elapsed >= 20 and price_holding_strong
+
                 steps.append({
                     "step": 3,
                     "status": "in_progress",
                     "title": "⏳ WATCHING CURRENT CANDLE for rejection",
-                    "details": f"Candle: {current_candle['candle_start']} ({60 - current_candle['time_remaining']}/60 mins complete)",
+                    "details": f"Candle: {current_candle['candle_start']} ({minutes_elapsed}/60 mins complete)",
                     "current_values": {
                         "low": f"${current_candle['low']:.2f}",
                         "current_price": f"${current_price:.2f}",
@@ -396,18 +401,50 @@ class ProTraderGold:
                     },
                     "watching_for": {
                         "wick_requirement": {
-                            "status": "complete" if wick_touched else "waiting",
+                            "status": "✅ Complete" if wick_touched else "⏳ Waiting",
                             "text": f"Wick must touch ${key_level:.2f} (support)",
                             "current": f"Low: ${current_candle['low']:.2f}",
                             "explanation": "The wick shows sellers tried to push lower but failed."
                         },
+                        "holding_requirement": {
+                            "status": "✅ Complete" if (wick_touched and minutes_elapsed >= 20) else "⏳ Waiting",
+                            "text": f"Price holding above ${key_level + 5:.2f} for 20+ minutes",
+                            "current": f"Currently: ${current_price:.2f} ({minutes_elapsed} mins elapsed)",
+                            "explanation": "Price holding strong shows buyers are in control."
+                        },
                         "close_requirement": {
-                            "status": "watching",
+                            "status": "⏳ Watching",
                             "text": f"Candle must close above ${key_level + 5:.2f}",
                             "current": f"Currently: ${current_price:.2f}",
                             "time_left": f"{current_candle['time_remaining']} minutes until close",
-                            "explanation": "Close above shows buyers won the battle."
+                            "explanation": "Close above confirms buyers won the battle."
                         }
+                    },
+                    "entry_timing": {
+                        "early_entry": {
+                            "available": early_entry_available,
+                            "type": "🟡 EARLY ENTRY (50% Position)",
+                            "status": "AVAILABLE NOW" if early_entry_available else "NOT READY",
+                            "trigger": f"Wick touched + holding above ${key_level + 5:.2f} for 20+ mins",
+                            "entry_price": f"${current_price:.2f} (market order)",
+                            "stop_loss": f"${key_level - 5:.2f}",
+                            "position_size": "50% of planned trade",
+                            "pros": "✓ Catch more of the move\n✓ Better average entry price\n✓ Psychological confidence",
+                            "cons": "⚠ Candle could still reverse\n⚠ {0} mins until confirmation".format(current_candle['time_remaining']),
+                            "action": "Enter 50% position NOW if confident" if early_entry_available else f"Wait {20 - minutes_elapsed} more minutes"
+                        },
+                        "confirmation_entry": {
+                            "type": "🟢 CONFIRMATION ENTRY (Add 50% More)",
+                            "trigger": f"Candle closes above ${key_level + 5:.2f}",
+                            "expected_time": current_candle['candle_close_expected'],
+                            "time_remaining": f"{current_candle['time_remaining']} minutes",
+                            "entry_price": f"~${current_price + 2:.2f}-${current_price + 5:.2f} (estimated)",
+                            "position_size": "Add remaining 50%",
+                            "pros": "✓ Fully confirmed setup\n✓ High confidence\n✓ Clear invalidation",
+                            "cons": "⚠ Slightly worse price\n⚠ Might miss fast moves",
+                            "action": "Add second 50% if candle closes strong"
+                        },
+                        "recommended": "Start with 50% early entry (if available), add 50% on confirmation. This balances catching the move while managing risk."
                     },
                     "explanation": "This candle tells us if support holds. Long wick + bullish close = buyers defending."
                 })
