@@ -25,6 +25,7 @@ from .gbpusd_confluence_system import (
 from .datafeed import fetch_h1
 from .current_price import get_current_xauusd_price
 from .oanda_feed import get_current_price as get_current_gbpusd_price
+from .pro_trader_gold import get_pro_trader_analysis
 
 # Scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -358,6 +359,36 @@ async def health_check():
         "version": "4.0",
         "timestamp": datetime.now(pytz.UTC).isoformat()
     }
+
+# PRO TRADER GOLD ENDPOINTS
+@app.get("/api/pro-trader-gold/analysis")
+async def get_pro_trader_gold_analysis():
+    """
+    Get Professional Trader Gold analysis
+    Educational setup tracker with step-by-step breakdown
+    """
+    try:
+        result = get_pro_trader_analysis()
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": f"Pro Trader analysis failed: {str(e)}",
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
+
+@app.post("/api/pro-trader-gold/scan")
+async def scan_pro_trader_gold():
+    """Force refresh Pro Trader Gold analysis"""
+    try:
+        result = get_pro_trader_analysis()
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": f"Pro Trader scan failed: {str(e)}",
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
 
 # SCHEDULER
 def scheduled_analysis():
