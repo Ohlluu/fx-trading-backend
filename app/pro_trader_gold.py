@@ -795,26 +795,155 @@ class ProTraderGold:
         }
 
     def _get_invalidation_conditions(self, setup: Dict) -> List[Dict[str, Any]]:
-        """Return invalidation conditions"""
+        """
+        Return DYNAMIC invalidation conditions based on current setup state
+        Conditions update in real-time as the setup progresses
+        """
+        if not setup.get("detected"):
+            return [
+                {
+                    "condition": "No setup detected yet",
+                    "reason": "Still scanning market",
+                    "action": "Wait for clear pattern to form",
+                    "severity": "INFO"
+                }
+            ]
+
+        pattern_type = setup.get("pattern_type", "SCANNING")
+        state = setup.get("state", "SCANNING")
         key_level = setup.get("key_level", 0)
 
+        # Pattern-specific invalidation conditions
+        if pattern_type == "BREAKOUT_RETEST":
+            return self._breakout_retest_invalidation(setup, state, key_level)
+        elif pattern_type == "DEMAND_ZONE":
+            return self._demand_zone_invalidation(setup, state, key_level)
+        else:
+            return [
+                {
+                    "condition": "No active setup",
+                    "reason": "Scanning for patterns",
+                    "action": "Wait for setup to form",
+                    "severity": "INFO"
+                }
+            ]
+
+    def _breakout_retest_invalidation(self, setup: Dict, state: str, key_level: float) -> List[Dict[str, Any]]:
+        """Dynamic invalidation for Breakout Retest pattern based on current state"""
+        conditions = []
+
+        # State-specific invalidations
+        if state == "BREAKOUT_CONFIRMED":
+            conditions.append({
+                "condition": f"Price closes back below ${key_level:.2f}",
+                "reason": "Breakout failed - false breakout",
+                "action": "Cancel setup immediately. This was a trap.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Price doesn't pull back within 4 candles",
+                "reason": "Ran away without retest opportunity",
+                "action": "Setup expired - wait for new pattern",
+                "severity": "HIGH"
+            })
+
+        elif state == "RETEST_HAPPENING":
+            conditions.append({
+                "condition": f"Current candle closes below ${key_level - 5:.2f}",
+                "reason": "Retest failed - buyers didn't defend",
+                "action": "Cancel setup. Support broken = bearish",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Candle wick goes below support but closes weak",
+                "reason": "Wick is good, but weak close = no buyers",
+                "action": "Wait for next candle confirmation",
+                "severity": "HIGH"
+            })
+
+        elif state == "REJECTION_WAITING":
+            conditions.append({
+                "condition": f"Candle closes below ${key_level:.2f}",
+                "reason": "Failed to reject from support - breakdown",
+                "action": "Setup INVALID. Exit if entered early.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Wick doesn't touch support by candle close",
+                "reason": "No actual test of support = fake setup",
+                "action": "Cancel. Must see wick touch support.",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "Price stays below key level for 15+ minutes",
+                "reason": "Sitting below support = weak buyers",
+                "action": "Probably invalidated, wait for close",
+                "severity": "MEDIUM"
+            })
+
+        elif state == "CONFIRMATION_WAITING":
+            conditions.append({
+                "condition": f"Next candle closes below ${key_level:.2f}",
+                "reason": "Rejection failed - price broke down after",
+                "action": "Setup dead. Do not enter.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Next candle makes lower low",
+                "reason": "Creating bearish structure - trend down",
+                "action": "Cancel setup, look for shorts instead",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "Low volume session starts (Asia)",
+                "reason": "Asian session = low liquidity, unreliable",
+                "action": "Skip entry or close position",
+                "severity": "MEDIUM"
+            })
+
+        elif state == "READY_TO_ENTER":
+            conditions.append({
+                "condition": f"Entry candle closes below ${key_level:.2f}",
+                "reason": "Setup collapsed on entry candle",
+                "action": "Do NOT enter. Setup failed.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Strong bearish candle forms",
+                "reason": "Momentum shifted bearish",
+                "action": "Cancel entry, setup invalid",
+                "severity": "HIGH"
+            })
+
+        # Universal invalidations (apply to all states)
+        conditions.append({
+            "condition": f"Price falls ${(key_level * 0.01):.2f}+ below support",
+            "reason": "Major support break (1% below key level)",
+            "action": "Setup completely dead. Look for new pattern.",
+            "severity": "CRITICAL"
+        })
+
+        return conditions
+
+    def _demand_zone_invalidation(self, setup: Dict, state: str, key_level: float) -> List[Dict[str, Any]]:
+        """Dynamic invalidation for Demand Zone pattern"""
         return [
             {
-                "condition": f"Price closes below ${key_level - 5:.2f}",
-                "reason": "Support zone broken",
-                "action": "Cancel setup, wait for new pattern",
+                "condition": f"Price closes below ${key_level - 10:.2f}",
+                "reason": "Demand zone violated",
+                "action": "Cancel setup - zone failed",
                 "severity": "CRITICAL"
             },
             {
-                "condition": "Next 2 candles close bearish",
-                "reason": "No buyer interest",
-                "action": "Setup failed, back to scanning",
+                "condition": "Multiple tests of zone without bounce",
+                "reason": "Zone is weak, being absorbed",
+                "action": "Setup failing, look elsewhere",
                 "severity": "HIGH"
             },
             {
-                "condition": "Low volume session starts",
-                "reason": "Asian session = less reliable",
-                "action": "Close positions or skip entry",
+                "condition": "No bullish reaction in zone",
+                "reason": "No buyers showing up",
+                "action": "Wait or cancel",
                 "severity": "MEDIUM"
             }
         ]
