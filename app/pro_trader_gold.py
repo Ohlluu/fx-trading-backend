@@ -65,14 +65,42 @@ class MultiTimeframeCache:
             return False
 
         elif timeframe == "H4":
-            # H4 expires every 4 hours
-            age = now - last_update
-            return age.total_seconds() / 3600 >= 4
+            # H4 expires at actual 4-hour candle boundaries
+            # H4 candles close at: 5pm, 9pm, 1am, 5am, 9am, 1pm NY (4pm, 8pm, 12am, 4am, 8am, 12pm CT)
+            ny_tz = pytz.timezone('America/New_York')
+            now_ny = now.astimezone(ny_tz)
+            last_update_ny = last_update.astimezone(ny_tz)
+
+            # H4 candles close at hours: 1, 5, 9, 13, 17, 21 (NY time)
+            h4_close_hours = [1, 5, 9, 13, 17, 21]
+
+            # Find the most recent H4 close
+            current_hour = now_ny.hour
+            most_recent_close_hour = max([h for h in h4_close_hours if h <= current_hour], default=21)
+
+            # If current hour is before the first close of the day, use yesterday's last close
+            if current_hour < h4_close_hours[0]:
+                most_recent_close = now_ny.replace(hour=h4_close_hours[-1], minute=0, second=0, microsecond=0) - timedelta(days=1)
+            else:
+                most_recent_close = now_ny.replace(hour=most_recent_close_hour, minute=0, second=0, microsecond=0)
+
+            # If last update was before the most recent close, it's expired
+            if last_update_ny < most_recent_close:
+                return True
+
+            return False
 
         elif timeframe == "H1":
-            # H1 expires every hour
-            age = now - last_update
-            return age.total_seconds() / 3600 >= 1
+            # H1 expires at actual hour boundaries (top of each hour)
+            # If we're at 7:45pm and last update was at 6:30pm, we've passed 7:00pm close
+            last_update_hour_boundary = last_update.replace(minute=0, second=0, microsecond=0)
+            current_hour_boundary = now.replace(minute=0, second=0, microsecond=0)
+
+            # If we've moved to a new hour, the cache is expired
+            if current_hour_boundary > last_update_hour_boundary:
+                return True
+
+            return False
 
         return True
 
@@ -126,38 +154,53 @@ class MultiTimeframeCache:
                 return f"Next update: {next_close_ct.strftime('%I:%M %p CT')} (in {minutes}m)"
 
         elif timeframe == "H4":
-            # Next 4-hour boundary (every 4 hours)
-            last_update = self.get_last_update(timeframe)
-            if not last_update:
-                return "Next update: Now"
+            # Next H4 candle close at actual market boundaries
+            # H4 closes at: 1am, 5am, 9am, 1pm, 5pm, 9pm NY
+            now_ny = now.astimezone(ny_tz)
+            h4_close_hours = [1, 5, 9, 13, 17, 21]
 
-            next_update = last_update + timedelta(hours=4)
-            if next_update <= now:
-                return "Next update: Now"
+            # Find next H4 close
+            current_hour = now_ny.hour
+            next_close_hour = None
 
-            time_until = next_update - now
+            for h in h4_close_hours:
+                if h > current_hour:
+                    next_close_hour = h
+                    break
+
+            if next_close_hour is None:
+                # Next close is tomorrow's first close
+                next_close = now_ny.replace(hour=h4_close_hours[0], minute=0, second=0, microsecond=0) + timedelta(days=1)
+            else:
+                next_close = now_ny.replace(hour=next_close_hour, minute=0, second=0, microsecond=0)
+
+            # Convert to Chicago for display
+            next_close_ct = next_close.astimezone(chicago_tz)
+            time_until = next_close.astimezone(pytz.UTC) - now
             hours = int(time_until.total_seconds() / 3600)
             minutes = int((time_until.total_seconds() % 3600) / 60)
 
             if hours > 0:
-                return f"Next update in {hours}h {minutes}m"
+                return f"Next update: {next_close_ct.strftime('%I:%M %p CT')} (in {hours}h {minutes}m)"
             else:
-                return f"Next update in {minutes}m"
+                return f"Next update: {next_close_ct.strftime('%I:%M %p CT')} (in {minutes}m)"
 
         elif timeframe == "H1":
+            # Next H1 candle close at top of next hour
+            now_ct = now.astimezone(chicago_tz)
+
             # Next hour boundary
-            last_update = self.get_last_update(timeframe)
-            if not last_update:
-                return "Next update: Now"
+            if now_ct.minute == 0 and now_ct.second == 0:
+                # Exactly on the hour
+                next_hour = now_ct + timedelta(hours=1)
+            else:
+                # Find next hour
+                next_hour = now_ct.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
 
-            next_update = last_update + timedelta(hours=1)
-            if next_update <= now:
-                return "Next update: Now"
-
-            time_until = next_update - now
+            time_until = next_hour.astimezone(pytz.UTC) - now
             minutes = int(time_until.total_seconds() / 60)
 
-            return f"Next update in {minutes}m"
+            return f"Next update: {next_hour.strftime('%I:%M %p CT')} (in {minutes}m)"
 
         return "Unknown"
 
