@@ -25,7 +25,8 @@ from .gbpusd_confluence_system import (
 from .datafeed import fetch_h1
 from .current_price import get_current_xauusd_price
 from .oanda_feed import get_current_price as get_current_gbpusd_price
-from .pro_trader_gold import get_pro_trader_analysis
+from .bullish_pro_trader_gold import get_bullish_pro_trader_analysis
+from .bearish_pro_trader_gold import get_bearish_pro_trader_analysis
 from .trade_manager import trade_manager
 from pydantic import BaseModel
 
@@ -366,12 +367,21 @@ async def health_check():
 @app.get("/api/pro-trader-gold/analysis")
 async def get_pro_trader_gold_analysis():
     """
-    Get Professional Trader Gold analysis
-    Educational setup tracker with step-by-step breakdown
+    Get BOTH Bullish and Bearish Professional Trader Gold analysis
+    Returns both BUY setups and SELL setups in one response
     """
     try:
-        result = await get_pro_trader_analysis()
-        return JSONResponse(result)
+        # Run both analyses in parallel
+        bullish_result, bearish_result = await asyncio.gather(
+            get_bullish_pro_trader_analysis(),
+            get_bearish_pro_trader_analysis()
+        )
+
+        return JSONResponse({
+            "bullish": bullish_result,
+            "bearish": bearish_result,
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        })
     except Exception as e:
         return JSONResponse({
             "status": "error",
@@ -379,12 +389,46 @@ async def get_pro_trader_gold_analysis():
             "timestamp": datetime.now(pytz.UTC).isoformat()
         }, status_code=500)
 
+@app.get("/api/pro-trader-gold/bullish")
+async def get_bullish_only():
+    """Get BULLISH (BUY) setups only"""
+    try:
+        result = await get_bullish_pro_trader_analysis()
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": f"Bullish analysis failed: {str(e)}",
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
+
+@app.get("/api/pro-trader-gold/bearish")
+async def get_bearish_only():
+    """Get BEARISH (SELL) setups only"""
+    try:
+        result = await get_bearish_pro_trader_analysis()
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": f"Bearish analysis failed: {str(e)}",
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
+
 @app.post("/api/pro-trader-gold/scan")
 async def scan_pro_trader_gold():
-    """Force refresh Pro Trader Gold analysis"""
+    """Force refresh BOTH Bullish and Bearish analysis"""
     try:
-        result = await get_pro_trader_analysis()
-        return JSONResponse(result)
+        bullish_result, bearish_result = await asyncio.gather(
+            get_bullish_pro_trader_analysis(),
+            get_bearish_pro_trader_analysis()
+        )
+
+        return JSONResponse({
+            "bullish": bullish_result,
+            "bearish": bearish_result,
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        })
     except Exception as e:
         return JSONResponse({
             "status": "error",
