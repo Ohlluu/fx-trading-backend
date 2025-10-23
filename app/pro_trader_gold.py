@@ -220,9 +220,16 @@ class ProTraderGold:
         else:
             structure = "Consolidating (no clear direction)"
 
-        # Get update times
+        # Get update times (convert to Chicago timezone for display)
+        chicago_tz = pytz.timezone('America/Chicago')
         last_updated = mtf_cache.get_last_update("D1")
         next_update = mtf_cache.get_next_update("D1")
+
+        # Convert last_updated to Chicago time for display
+        last_updated_str = "Just now"
+        if last_updated:
+            last_updated_ct = last_updated.astimezone(chicago_tz)
+            last_updated_str = last_updated_ct.strftime("%b %d, %I:%M %p CT")
 
         return {
             "trend": trend,
@@ -233,7 +240,7 @@ class ProTraderGold:
                 f"Recent low: ${recent_low:.2f} ({days_since_low} days ago)",
                 f"Structure: {structure}"
             ],
-            "last_updated": last_updated.strftime("%b %d, %I:%M %p") if last_updated else "Just now",
+            "last_updated": last_updated_str,
             "next_update": next_update
         }
 
@@ -295,9 +302,16 @@ class ProTraderGold:
         # Calculate distance to key level
         distance_pips = abs(current_price - key_level)
 
-        # Get update times
+        # Get update times (convert to Chicago timezone for display)
+        chicago_tz = pytz.timezone('America/Chicago')
         last_updated = mtf_cache.get_last_update("H4")
         next_update = mtf_cache.get_next_update("H4")
+
+        # Convert last_updated to Chicago time for display
+        last_updated_str = "Just now"
+        if last_updated:
+            last_updated_ct = last_updated.astimezone(chicago_tz)
+            last_updated_str = last_updated_ct.strftime("%b %d, %I:%M %p CT")
 
         return {
             "key_level": key_level,
@@ -305,7 +319,7 @@ class ProTraderGold:
             "resistance_levels": resistance,
             "support_levels": support,
             "distance_pips": round(distance_pips, 1),
-            "last_updated": last_updated.strftime("%b %d, %I:%M %p") if last_updated else "Just now",
+            "last_updated": last_updated_str,
             "next_update": next_update
         }
 
