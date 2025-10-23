@@ -300,11 +300,16 @@ class ProTraderGold:
         """
         last_closed_candle = h1_data.iloc[-1]
 
-        # Calculate time remaining in current candle
-        now = datetime.now(pytz.UTC)
-        current_hour_start = now.replace(minute=0, second=0, microsecond=0)
-        next_hour_start = current_hour_start + timedelta(hours=1)
-        minutes_remaining = int((next_hour_start - now).total_seconds() / 60)
+        # Calculate time remaining in current candle (UTC)
+        now_utc = datetime.now(pytz.UTC)
+        current_hour_start_utc = now_utc.replace(minute=0, second=0, microsecond=0)
+        next_hour_start_utc = current_hour_start_utc + timedelta(hours=1)
+        minutes_remaining = int((next_hour_start_utc - now_utc).total_seconds() / 60)
+
+        # Convert to Chicago time for display
+        chicago_tz = pytz.timezone('America/Chicago')
+        current_hour_start_ct = current_hour_start_utc.astimezone(chicago_tz)
+        next_hour_start_ct = next_hour_start_utc.astimezone(chicago_tz)
 
         # Current candle estimation
         current_candle_open = float(last_closed_candle['close'])
@@ -318,8 +323,8 @@ class ProTraderGold:
             "low": current_low,
             "current": current_price,
             "time_remaining": minutes_remaining,
-            "candle_start": current_hour_start.strftime("%I:%M %p"),
-            "candle_close_expected": next_hour_start.strftime("%I:%M %p")
+            "candle_start": current_hour_start_ct.strftime("%I:%M %p CT"),
+            "candle_close_expected": next_hour_start_ct.strftime("%I:%M %p CT")
         }
 
     def _build_setup_steps(self, setup: Dict, current_price: float, current_candle: Dict) -> List[Dict[str, Any]]:
