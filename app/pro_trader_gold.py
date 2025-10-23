@@ -82,7 +82,7 @@ class ProTraderGold:
 
                 # Chart data for visualization
                 "chart_data": {
-                    "h1_candles": h1_data.tail(24).to_dict('records'),
+                    "h1_candles": self._convert_candles_to_json(h1_data.tail(24)),
                     "key_levels": h4_levels,
                     "current_price": current_price
                 },
@@ -625,6 +625,21 @@ class ProTraderGold:
                 "severity": "MEDIUM"
             }
         ]
+
+    def _convert_candles_to_json(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """Convert pandas DataFrame with Timestamp index to JSON-safe format"""
+        candles = []
+        for idx, row in df.iterrows():
+            candle = {
+                "time": idx.isoformat() if hasattr(idx, 'isoformat') else str(idx),
+                "open": float(row['open']),
+                "high": float(row['high']),
+                "low": float(row['low']),
+                "close": float(row['close']),
+                "volume": int(row.get('volume', 0))
+            }
+            candles.append(candle)
+        return candles
 
     def _error_response(self, message: str) -> Dict[str, Any]:
         """Return error response"""
