@@ -26,6 +26,8 @@ from .datafeed import fetch_h1
 from .current_price import get_current_xauusd_price
 from .oanda_feed import get_current_price as get_current_gbpusd_price
 from .pro_trader_gold import get_pro_trader_analysis
+from .trade_manager import trade_manager
+from pydantic import BaseModel
 
 # Scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -388,6 +390,106 @@ async def scan_pro_trader_gold():
             "status": "error",
             "message": f"Pro Trader scan failed: {str(e)}",
             "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
+
+# TRADE MANAGEMENT MODELS
+class EnterTradeRequest(BaseModel):
+    entry_price: float
+    position_size: int  # 50 or 100
+    stop_loss: float
+    take_profit_1: float
+    take_profit_2: Optional[float] = None
+    trade_direction: str = "LONG"
+
+class ExitTradeRequest(BaseModel):
+    exit_price: float
+    position_size: int  # 50 or 100
+    reason: str = "Manual Exit"
+
+# TRADE MANAGEMENT ENDPOINTS
+@app.post("/api/pro-trader-gold/enter-trade")
+async def enter_trade(request: EnterTradeRequest):
+    """Record that user entered a trade"""
+    try:
+        result = trade_manager.enter_trade(
+            entry_price=request.entry_price,
+            position_size=request.position_size,
+            stop_loss=request.stop_loss,
+            take_profit_1=request.take_profit_1,
+            take_profit_2=request.take_profit_2,
+            trade_direction=request.trade_direction
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+@app.post("/api/pro-trader-gold/exit-trade")
+async def exit_trade(request: ExitTradeRequest):
+    """Record that user exited a trade"""
+    try:
+        result = trade_manager.exit_trade(
+            exit_price=request.exit_price,
+            position_size=request.position_size,
+            reason=request.reason
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+@app.get("/api/pro-trader-gold/trade-status")
+async def get_trade_status():
+    """Get current trade status with P&L and alerts"""
+    try:
+        # Get current price
+        current_price = await get_current_xauusd_price()
+
+        # Get trade status
+        trade_status = trade_manager.get_trade_status(current_price)
+
+        # If in trade, get alerts
+        if trade_status['in_trade']:
+            # Get current candle data for alerts
+            h1_data = await fetch_h1("XAUUSD", timeframe="H1")
+            last_candle = h1_data.iloc[-1] if not h1_data.empty else None
+
+            current_candle = {
+                'open': float(last_candle['open']) if last_candle is not None else current_price,
+                'high': float(last_candle['high']) if last_candle is not None else current_price,
+                'low': float(last_candle['low']) if last_candle is not None else current_price,
+                'close': float(last_candle['close']) if last_candle is not None else current_price
+            }
+
+            alerts = trade_manager.get_trade_alerts(current_price, current_candle)
+            trade_status['alerts'] = alerts
+
+        return JSONResponse(trade_status)
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
+
+@app.get("/api/pro-trader-gold/trade-history")
+async def get_trade_history():
+    """Get trade history"""
+    try:
+        history = trade_manager.get_trade_history(limit=20)
+        stats = trade_manager.get_statistics()
+
+        return JSONResponse({
+            "history": history,
+            "statistics": stats
+        })
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
         }, status_code=500)
 
 # SCHEDULER
