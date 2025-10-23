@@ -5,6 +5,7 @@ Gathers 2+ years of OANDA data for professional analysis
 """
 
 import asyncio
+import os
 from datetime import datetime, timedelta
 import pandas as pd
 import pytz
@@ -12,7 +13,7 @@ from app.oanda_feed import get_xauusd_candles
 import httpx
 
 # OANDA API Configuration
-OANDA_API_KEY = "1c2ee716aac27b425f2fd7a8ffbe9b9a-7a3b3da61668a804b56e2974ff21aaa0"
+OANDA_API_KEY = os.getenv("OANDA_API_KEY", "1c2ee716aac27b425f2fd7a8ffbe9b9a-7a3b3da61668a804b56e2974ff21aaa0")
 OANDA_BASE_URL = "https://api-fxpractice.oanda.com/v3"
 
 async def get_historical_candles_range(start_date: datetime, end_date: datetime) -> pd.DataFrame:

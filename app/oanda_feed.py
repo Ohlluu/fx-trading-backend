@@ -14,9 +14,9 @@ import pytz
 from datetime import datetime as dt_helper
 
 # OANDA API Configuration
-OANDA_API_KEY = "1c2ee716aac27b425f2fd7a8ffbe9b9a-7a3b3da61668a804b56e2974ff21aaa0"
+OANDA_API_KEY = os.getenv("OANDA_API_KEY", "1c2ee716aac27b425f2fd7a8ffbe9b9a-7a3b3da61668a804b56e2974ff21aaa0")
 OANDA_BASE_URL = "https://api-fxpractice.oanda.com/v3"
-ACCOUNT_ID = "101-001-37143591-001"
+ACCOUNT_ID = os.getenv("OANDA_ACCOUNT_ID", "101-001-37143591-001")
 
 async def get_current_xauusd_price() -> Optional[float]:
     """

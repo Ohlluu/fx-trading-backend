@@ -69,10 +69,17 @@ The app will automatically use the Procfile for deployment.
 
 ## Environment Variables
 
-- `TWELVE_DATA_API_KEY`: TwelveData API key for market data
-- `OANDA_API_KEY`: OANDA API key (optional)
-- `OANDA_ACCOUNT_ID`: OANDA account ID (optional)
+The system uses TWO API sources:
+
+### Required APIs
+- `TWELVE_DATA_API_KEY`: TwelveData API key for historical candle data
+- `OANDA_API_KEY`: OANDA API key for real-time prices (default value included)
+- `OANDA_ACCOUNT_ID`: OANDA account ID (default value included)
+
+### Optional
 - `ENVIRONMENT`: Set to "production" for production deployment
+
+**Note**: The OANDA credentials have default values so the system will work out of the box, but you can override them with environment variables if needed.
 
 ## License
 
