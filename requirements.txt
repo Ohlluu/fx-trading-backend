@@ -16,6 +16,3 @@ pytz==2024.2
 
 # Background tasks
 APScheduler==3.10.4
-
-# CORS middleware (included with FastAPI but explicit version)
-starlette==0.41.2
