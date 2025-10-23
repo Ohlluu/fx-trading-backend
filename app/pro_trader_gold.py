@@ -13,6 +13,66 @@ import pytz
 from .datafeed import fetch_h1
 from .current_price import get_current_xauusd_price
 
+class MultiTimeframeCache:
+    """Caches multi-timeframe data with appropriate expiry times"""
+
+    def __init__(self):
+        self.cache = {
+            "D1": {"data": None, "last_update": None, "expiry_hours": 24},  # Update once per day
+            "H4": {"data": None, "last_update": None, "expiry_hours": 4},   # Update every 4 hours
+            "H1": {"data": None, "last_update": None, "expiry_hours": 1}    # Update every hour
+        }
+
+    def is_expired(self, timeframe: str) -> bool:
+        """Check if cached data for timeframe has expired"""
+        cache_entry = self.cache.get(timeframe)
+        if not cache_entry or cache_entry["data"] is None or cache_entry["last_update"] is None:
+            return True
+
+        now = datetime.now(pytz.UTC)
+        age = now - cache_entry["last_update"]
+        return age.total_seconds() / 3600 >= cache_entry["expiry_hours"]
+
+    def get(self, timeframe: str):
+        """Get cached data if not expired"""
+        if self.is_expired(timeframe):
+            return None
+        return self.cache[timeframe]["data"]
+
+    def set(self, timeframe: str, data):
+        """Store data in cache"""
+        self.cache[timeframe]["data"] = data
+        self.cache[timeframe]["last_update"] = datetime.now(pytz.UTC)
+
+    def get_last_update(self, timeframe: str) -> Optional[datetime]:
+        """Get last update time for timeframe"""
+        return self.cache[timeframe].get("last_update")
+
+    def get_next_update(self, timeframe: str) -> str:
+        """Calculate when next update will occur"""
+        last_update = self.get_last_update(timeframe)
+        if not last_update:
+            return "Next update: Now"
+
+        expiry_hours = self.cache[timeframe]["expiry_hours"]
+        next_update = last_update + timedelta(hours=expiry_hours)
+        now = datetime.now(pytz.UTC)
+
+        if next_update <= now:
+            return "Next update: Now"
+
+        time_until = next_update - now
+        hours = int(time_until.total_seconds() / 3600)
+        minutes = int((time_until.total_seconds() % 3600) / 60)
+
+        if hours > 0:
+            return f"Next update in {hours}h {minutes}m"
+        else:
+            return f"Next update in {minutes}m"
+
+# Global MTF cache
+mtf_cache = MultiTimeframeCache()
+
 class ProTraderGold:
     """
     Educational trading system that shows professional trader thought process
@@ -23,7 +83,7 @@ class ProTraderGold:
         self.pair = "XAUUSD"
         self.timeframes = {
             "D1": 200,  # 200 days
-            "H4": 500,  # ~83 days of 4H candles
+            "H4": 500,  # ~83 days of 4H candles (approx 83 days * 6 candles/day)
             "H1": 100   # 100 hours
         }
 
@@ -32,20 +92,22 @@ class ProTraderGold:
         Main function: Returns complete setup analysis with educational breakdown
         """
         try:
-            # Fetch multi-timeframe data
-            h1_data = await fetch_h1(self.pair, timeframe="H1")
+            # Fetch multi-timeframe data with caching
+            d1_data = await self._get_timeframe_data("D1")
+            h4_data = await self._get_timeframe_data("H4")
+            h1_data = await self._get_timeframe_data("H1")
 
             if h1_data is None or h1_data.empty:
-                return self._error_response("No data available")
+                return self._error_response("No H1 data available")
 
             # Get current live price
             current_price = await get_current_xauusd_price()
             if current_price is None:
                 current_price = float(h1_data['close'].iloc[-1])
 
-            # Analyze market structure across timeframes
-            daily_analysis = self._analyze_daily_trend(h1_data)
-            h4_levels = self._identify_key_levels_h4(h1_data)
+            # Analyze market structure across timeframes (using REAL data)
+            daily_analysis = self._analyze_daily_trend(d1_data, current_price)
+            h4_levels = self._identify_key_levels_h4(h4_data, current_price)
             h1_setup = self._detect_setup_pattern(h1_data, h4_levels, current_price)
 
             # Get current candle details
@@ -93,72 +155,158 @@ class ProTraderGold:
         except Exception as e:
             return self._error_response(f"Error: {str(e)}")
 
-    def _analyze_daily_trend(self, h1_data: pd.DataFrame) -> Dict[str, Any]:
+    async def _get_timeframe_data(self, timeframe: str) -> pd.DataFrame:
         """
-        Analyze daily timeframe trend
-        In real implementation, would fetch D1 data separately
-        For now, derive from H1 data
+        Fetch timeframe data with caching
+        D1 updates once per day, H4 every 4 hours, H1 every hour
         """
-        # Calculate daily-equivalent indicators from H1
-        close = h1_data['close']
+        # Check cache first
+        cached_data = mtf_cache.get(timeframe)
+        if cached_data is not None:
+            return cached_data
 
-        # Simple trend analysis
-        sma_200 = close.rolling(window=200).mean()
-        current_price = close.iloc[-1]
-        sma_200_current = sma_200.iloc[-1] if len(sma_200) > 0 else current_price
+        # Fetch fresh data
+        data = await fetch_h1(self.pair, timeframe=timeframe)
 
-        trend = "BULLISH" if current_price > sma_200_current else "BEARISH"
+        # Store in cache
+        mtf_cache.set(timeframe, data)
 
-        # Find recent swing highs/lows
-        recent_high = h1_data['high'].tail(48).max()  # Last 2 days
-        recent_low = h1_data['low'].tail(48).min()
+        return data
+
+    def _analyze_daily_trend(self, d1_data: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+        """
+        Analyze REAL daily timeframe trend using D1 candles
+        Updates once per day when daily candle closes
+        """
+        if d1_data is None or d1_data.empty:
+            return {
+                "trend": "UNKNOWN",
+                "explanation": "No daily data available",
+                "points": ["Unable to fetch daily data"],
+                "last_updated": "Never",
+                "next_update": "Waiting for data"
+            }
+
+        # Calculate 200-day EMA on ACTUAL daily candles
+        d1_data['ema_200'] = d1_data['close'].ewm(span=200, adjust=False).mean()
+
+        # Get today's EMA value
+        ema_200_current = float(d1_data['ema_200'].iloc[-1])
+
+        # Determine trend
+        trend = "BULLISH" if current_price > ema_200_current else "BEARISH"
+
+        # Find recent swing high/low (last 20 days)
+        recent_data = d1_data.tail(20)
+        recent_high = float(recent_data['high'].max())
+        recent_low = float(recent_data['low'].min())
+
+        # Find when these highs/lows occurred
+        high_idx = recent_data['high'].idxmax()
+        low_idx = recent_data['low'].idxmin()
+        days_since_high = len(recent_data) - recent_data.index.get_loc(high_idx) - 1
+        days_since_low = len(recent_data) - recent_data.index.get_loc(low_idx) - 1
+
+        # Determine structure
+        last_5_highs = d1_data['high'].tail(5)
+        last_5_lows = d1_data['low'].tail(5)
+        making_higher_highs = last_5_highs.iloc[-1] > last_5_highs.iloc[-3]
+        making_lower_lows = last_5_lows.iloc[-1] < last_5_lows.iloc[-3]
+
+        if making_higher_highs:
+            structure = "Making higher highs (bullish structure)"
+        elif making_lower_lows:
+            structure = "Making lower lows (bearish structure)"
+        else:
+            structure = "Consolidating (no clear direction)"
+
+        # Get update times
+        last_updated = mtf_cache.get_last_update("D1")
+        next_update = mtf_cache.get_next_update("D1")
 
         return {
             "trend": trend,
-            "explanation": f"Price is {'above' if trend == 'BULLISH' else 'below'} long-term average",
+            "explanation": f"Price is {'above' if trend == 'BULLISH' else 'below'} 200-day EMA (${ema_200_current:.2f})",
             "points": [
-                f"Trend: {trend} (price {'above' if trend == 'BULLISH' else 'below'} 200-period average)",
-                f"Recent high: ${recent_high:.2f}",
-                f"Recent low: ${recent_low:.2f}",
-                "Structure: " + ("Making higher highs" if trend == "BULLISH" else "Making lower lows")
-            ]
+                f"Trend: {trend} (current: ${current_price:.2f} vs 200 EMA: ${ema_200_current:.2f})",
+                f"Recent high: ${recent_high:.2f} ({days_since_high} days ago)",
+                f"Recent low: ${recent_low:.2f} ({days_since_low} days ago)",
+                f"Structure: {structure}"
+            ],
+            "last_updated": last_updated.strftime("%b %d, %I:%M %p") if last_updated else "Just now",
+            "next_update": next_update
         }
 
-    def _identify_key_levels_h4(self, h1_data: pd.DataFrame) -> Dict[str, Any]:
+    def _identify_key_levels_h4(self, h4_data: pd.DataFrame, current_price: float) -> Dict[str, Any]:
         """
-        Identify key support/resistance levels
-        These are the levels pros mark on their charts
+        Identify key support/resistance levels using REAL 4H candles
+        Updates every 4 hours when 4H candle closes
         """
-        # Use last 200 H1 candles to find key levels
-        highs = h1_data['high'].tail(200)
-        lows = h1_data['low'].tail(200)
+        if h4_data is None or h4_data.empty:
+            return {
+                "key_level": current_price,
+                "level_type": "unknown",
+                "last_updated": "Never",
+                "next_update": "Waiting for data"
+            }
 
-        # Find recent significant levels (simplified)
-        # In real implementation, would use proper S/R detection
+        # Use last 100 H4 candles to find key levels (approx 17 days)
+        recent_data = h4_data.tail(100)
+        highs = recent_data['high']
+        lows = recent_data['low']
+
+        # Find significant resistance/support levels
         resistance_candidates = []
         support_candidates = []
 
-        # Find local highs/lows
-        for i in range(10, len(highs) - 10):
+        # Find local highs/lows using 4H candles
+        for i in range(5, len(highs) - 5):
             # Resistance: local high
-            if highs.iloc[i] == highs.iloc[i-10:i+10].max():
+            if highs.iloc[i] == highs.iloc[i-5:i+5].max():
                 resistance_candidates.append(float(highs.iloc[i]))
             # Support: local low
-            if lows.iloc[i] == lows.iloc[i-10:i+10].min():
+            if lows.iloc[i] == lows.iloc[i-5:i+5].min():
                 support_candidates.append(float(lows.iloc[i]))
 
-        # Get most recent/relevant levels
-        resistance = sorted(resistance_candidates)[-3:] if resistance_candidates else []
-        support = sorted(support_candidates)[-3:] if support_candidates else []
+        # Get most relevant levels near current price
+        resistance = sorted([r for r in resistance_candidates if r > current_price])[:3] if resistance_candidates else []
+        support = sorted([s for s in support_candidates if s < current_price], reverse=True)[:3] if support_candidates else []
 
-        # Identify THE key level (most touched)
-        key_level = resistance[0] if resistance else support[-1] if support else float(h1_data['close'].iloc[-1])
+        # Identify THE key level (closest to price)
+        if resistance and support:
+            nearest_resistance = resistance[0]
+            nearest_support = support[0]
+            if abs(current_price - nearest_resistance) < abs(current_price - nearest_support):
+                key_level = nearest_resistance
+                level_type = "resistance"
+            else:
+                key_level = nearest_support
+                level_type = "support"
+        elif resistance:
+            key_level = resistance[0]
+            level_type = "resistance"
+        elif support:
+            key_level = support[0]
+            level_type = "support"
+        else:
+            key_level = float(recent_data['close'].iloc[-1])
+            level_type = "pivot"
+
+        # Calculate distance to key level
+        distance_pips = abs(current_price - key_level)
+
+        # Get update times
+        last_updated = mtf_cache.get_last_update("H4")
+        next_update = mtf_cache.get_next_update("H4")
 
         return {
             "key_level": key_level,
+            "level_type": level_type,
             "resistance_levels": resistance,
             "support_levels": support,
-            "level_type": "resistance" if key_level in resistance else "support"
+            "distance_pips": round(distance_pips, 1),
+            "last_updated": last_updated.strftime("%b %d, %I:%M %p") if last_updated else "Just now",
+            "next_update": next_update
         }
 
     def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
@@ -536,16 +684,19 @@ class ProTraderGold:
         """Explain 4H timeframe structure"""
         key_level = h4_levels["key_level"]
         level_type = h4_levels["level_type"]
+        distance = h4_levels.get("distance_pips", abs(current_price - key_level))
 
         return {
             "key_level": key_level,
             "level_type": level_type,
             "points": [
                 f"Key Level: ${key_level:.2f} ({level_type})",
-                f"This level has been tested multiple times",
-                f"Currently {abs(current_price - key_level):.1f} pips away",
+                f"This level has been tested multiple times on 4H chart",
+                f"Currently {distance:.1f} pips away from key level",
                 "Structure shows institutional interest at this price"
-            ]
+            ],
+            "last_updated": h4_levels.get("last_updated", "Unknown"),
+            "next_update": h4_levels.get("next_update", "Unknown")
         }
 
     def _explain_h1_pattern(self, setup: Dict) -> Dict[str, Any]:

@@ -74,6 +74,8 @@ def _norm_timeframe_for_api(tf: str) -> str:
     """
     Maps common timeframe variants to Twelve Data format.
     Accepts 'H1', '1H', '1h' -> '1h' (hourly)
+    Accepts 'H4', '4H', '4h' -> '4h' (4-hour)
+    Accepts 'D1', '1D', '1d' -> '1day' (daily)
     Accepts '15m', '15M', 'M15' -> '15min' (for day trading)
     Extend here if you decide to support other frames later.
     """
@@ -82,6 +84,10 @@ def _norm_timeframe_for_api(tf: str) -> str:
     tf_up = tf.strip().upper()
     if tf_up in ("H1", "1H"):
         return "1h"
+    elif tf_up in ("H4", "4H"):
+        return "4h"
+    elif tf_up in ("D1", "1D"):
+        return "1day"
     elif tf_up in ("15M", "M15", "15MIN"):
         return "15min"
     elif tf.lower() == "15m":
@@ -90,13 +96,17 @@ def _norm_timeframe_for_api(tf: str) -> str:
 
 def _norm_timeframe_for_filename(tf: str) -> str:
     """
-    Normalize timeframe to filename token (e.g., 'H1', 'M15').
+    Normalize timeframe to filename token (e.g., 'H1', 'H4', 'D1', 'M15').
     """
     if not tf:
         return "H1"
     tf_up = tf.strip().upper()
     if tf_up in ("1H", "H1"):
         return "H1"
+    elif tf_up in ("4H", "H4"):
+        return "H4"
+    elif tf_up in ("1D", "D1"):
+        return "D1"
     elif tf_up in ("15M", "M15", "15MIN") or tf.lower() == "15m":
         return "M15"
     return tf_up
