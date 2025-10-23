@@ -368,7 +368,7 @@ async def get_pro_trader_gold_analysis():
     Educational setup tracker with step-by-step breakdown
     """
     try:
-        result = get_pro_trader_analysis()
+        result = await get_pro_trader_analysis()
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({
@@ -381,7 +381,7 @@ async def get_pro_trader_gold_analysis():
 async def scan_pro_trader_gold():
     """Force refresh Pro Trader Gold analysis"""
     try:
-        result = get_pro_trader_analysis()
+        result = await get_pro_trader_analysis()
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({

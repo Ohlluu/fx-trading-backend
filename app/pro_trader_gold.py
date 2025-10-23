@@ -27,19 +27,19 @@ class ProTraderGold:
             "H1": 100   # 100 hours
         }
 
-    def get_detailed_setup(self) -> Dict[str, Any]:
+    async def get_detailed_setup(self) -> Dict[str, Any]:
         """
         Main function: Returns complete setup analysis with educational breakdown
         """
         try:
             # Fetch multi-timeframe data
-            h1_data = fetch_h1(self.pair, timeframe="H1")
+            h1_data = await fetch_h1(self.pair, timeframe="H1")
 
             if h1_data is None or h1_data.empty:
                 return self._error_response("No data available")
 
             # Get current live price
-            current_price = get_current_xauusd_price()
+            current_price = await get_current_xauusd_price()
             if current_price is None:
                 current_price = float(h1_data['close'].iloc[-1])
 
@@ -638,7 +638,7 @@ class ProTraderGold:
 
 
 # Convenience function for API
-def get_pro_trader_analysis() -> Dict[str, Any]:
+async def get_pro_trader_analysis() -> Dict[str, Any]:
     """Get professional trader analysis for XAUUSD"""
     system = ProTraderGold()
-    return system.get_detailed_setup()
+    return await system.get_detailed_setup()
