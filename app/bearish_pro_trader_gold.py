@@ -258,15 +258,15 @@ class BearishProTraderGold:
         key_level = h4_levels["key_level"]
         last_candles = h1_data.tail(10)
 
-        # Check for BREAKOUT RETEST pattern
-        breakout_setup = self._check_breakout_retest(last_candles, key_level, current_price)
-        if breakout_setup["detected"]:
-            return breakout_setup
+        # Check for BREAKDOWN RETEST pattern
+        breakdown_setup = self._check_breakout_retest(last_candles, key_level, current_price)
+        if breakdown_setup["detected"]:
+            return breakdown_setup
 
-        # Check for DEMAND ZONE pattern
-        demand_setup = self._check_demand_zone(last_candles, h4_levels, current_price)
-        if demand_setup["detected"]:
-            return demand_setup
+        # Check for SUPPLY ZONE pattern (bearish resistance zone)
+        supply_setup = self._check_supply_zone(last_candles, h4_levels, current_price)
+        if supply_setup["detected"]:
+            return supply_setup
 
         # Default: SCANNING
         return {
@@ -365,28 +365,62 @@ class BearishProTraderGold:
             "expected_entry": current_price
         }
 
-    def _check_demand_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
+    def _check_supply_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
         """
-        Check for Demand Zone pattern
-        (Simplified for now)
+        Check for SUPPLY ZONE pattern (BEARISH):
+        - Price approaching a RESISTANCE level where sellers historically defended
+        - Looking for bearish rejection + SHORT opportunity
         """
-        support_levels = h4_levels.get("support_levels", [])
+        resistance_levels = h4_levels.get("resistance_levels", [])
 
-        if not support_levels:
+        if not resistance_levels:
             return {"detected": False}
 
-        # Check if price is near a support level
-        nearest_support = min(support_levels, key=lambda x: abs(x - current_price))
+        # Check if price is near a resistance level (within 10 pips)
+        nearest_resistance = min(resistance_levels, key=lambda x: abs(x - current_price))
 
-        if abs(current_price - nearest_support) < 10:
+        # SUPPLY ZONE detected if price is within 10 pips of resistance
+        if abs(current_price - nearest_resistance) < 10:
+            # Check recent candles for bearish confirmation
+            last_candle = candles.iloc[-1]
+
+            # Calculate rejection signs
+            upper_wick = last_candle['high'] - max(last_candle['open'], last_candle['close'])
+            body_size = abs(last_candle['close'] - last_candle['open'])
+            is_bearish = last_candle['close'] < last_candle['open']
+
+            # Determine state based on confirmation level
+            confirmations = 0
+            if upper_wick > 3:  # Long upper wick = rejection at resistance
+                confirmations += 1
+            if is_bearish and body_size > 5:  # Strong bearish candle
+                confirmations += 1
+
+            # Determine progress
+            if confirmations >= 2:
+                state = "REJECTION_CONFIRMED"
+                progress = "3/5"
+            elif confirmations == 1:
+                state = "WATCHING"
+                progress = "2/5"
+            else:
+                state = "AT_ZONE"
+                progress = "1/5"
+
             return {
                 "detected": True,
-                "pattern_type": "DEMAND_ZONE",
-                "state": "WATCHING",
-                "progress": "2/5",
-                "key_level": nearest_support,
-                "confirmations": 0,
-                "expected_entry": current_price
+                "pattern_type": "SUPPLY_ZONE",
+                "direction": "SHORT",
+                "state": state,
+                "progress": progress,
+                "key_level": nearest_resistance,
+                "confirmations": confirmations,
+                "expected_entry": current_price,
+                "rejection_signs": {
+                    "upper_wick": float(upper_wick),
+                    "is_bearish": is_bearish,
+                    "body_size": float(body_size)
+                }
             }
 
         return {"detected": False}
@@ -432,8 +466,8 @@ class BearishProTraderGold:
 
         if pattern == "BREAKDOWN_RETEST":
             return self._breakdown_retest_steps(setup, current_price, current_candle)
-        elif pattern == "DEMAND_ZONE":
-            return self._demand_zone_steps(setup, current_price)
+        elif pattern == "SUPPLY_ZONE":
+            return self._supply_zone_steps(setup, current_price)
         else:
             return self._scanning_steps()
 
@@ -773,17 +807,130 @@ class BearishProTraderGold:
 
         return steps
 
-    def _demand_zone_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
-        """Steps for demand zone pattern"""
-        return [
-            {
-                "step": 1,
+    def _supply_zone_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
+        """
+        Create detailed steps for SUPPLY ZONE pattern (BEARISH)
+        Price approaching resistance where sellers historically defended
+        """
+        key_level = setup["key_level"]
+        state = setup["state"]
+        confirmations = setup.get("confirmations", 0)
+        rejection_signs = setup.get("rejection_signs", {})
+
+        steps = []
+
+        # Step 1: Price at supply zone
+        steps.append({
+            "step": 1,
+            "status": "complete",
+            "title": f"Price reached supply zone at ${key_level:.2f}",
+            "details": f"Current: ${current_price:.2f} (within resistance zone)",
+            "explanation": "This is a RESISTANCE level where sellers historically defended. Institutions often place SELL orders here."
+        })
+
+        # Step 2: Watching for bearish rejection
+        if state in ["AT_ZONE", "WATCHING", "REJECTION_CONFIRMED"]:
+            upper_wick = rejection_signs.get("upper_wick", 0)
+            is_bearish = rejection_signs.get("is_bearish", False)
+
+            if state == "AT_ZONE":
+                steps.append({
+                    "step": 2,
+                    "status": "in_progress",
+                    "title": "⏳ WATCHING for bearish rejection",
+                    "details": f"Looking for sellers to defend ${key_level:.2f} resistance",
+                    "watching_for": {
+                        "upper_wick": {
+                            "status": "✅ Detected" if upper_wick > 3 else "⏳ Waiting",
+                            "text": "Long upper wick (sellers rejecting higher prices)",
+                            "current": f"Upper wick: ${upper_wick:.2f}" if upper_wick > 0 else "No rejection yet"
+                        },
+                        "bearish_candle": {
+                            "status": "✅ Confirmed" if is_bearish else "⏳ Waiting",
+                            "text": "Red/bearish candle (close below open)",
+                            "current": "Bearish candle" if is_bearish else "Not yet bearish"
+                        },
+                        "close_requirement": {
+                            "status": "⏳ Watching",
+                            "text": f"Close BELOW ${key_level - 5:.2f}",
+                            "current": f"Currently: ${current_price:.2f}",
+                            "explanation": "Close below confirms sellers won"
+                        }
+                    },
+                    "explanation": "Upper wick + bearish close = sellers defending resistance"
+                })
+            elif state == "WATCHING":
+                steps.append({
+                    "step": 2,
+                    "status": "in_progress",
+                    "title": "⚠️ Partial rejection detected",
+                    "details": f"1/2 bearish signs confirmed at ${key_level:.2f}",
+                    "confirmations": f"{confirmations}/2 rejection signs",
+                    "explanation": "Getting closer. Need one more confirmation for high-probability SHORT."
+                })
+            else:  # REJECTION_CONFIRMED
+                steps.append({
+                    "step": 2,
+                    "status": "complete",
+                    "title": "✅ Bearish rejection confirmed",
+                    "details": f"Strong selling pressure at ${key_level:.2f}",
+                    "confirmations": f"Upper wick: ${upper_wick:.2f}, Bearish candle: Yes",
+                    "explanation": "Sellers defended resistance! Setup forming."
+                })
+
+        # Step 3: Confirmation candle needed
+        if state == "REJECTION_CONFIRMED":
+            steps.append({
+                "step": 3,
+                "status": "waiting",
+                "title": "WAITING for confirmation candle",
+                "details": "Next 1H candle must close bearish",
+                "requirements": [
+                    {"text": f"Close BELOW ${key_level - 10:.2f}", "explanation": "Shows downward momentum"},
+                    {"text": "Red/bearish candle", "explanation": "Sellers in control"},
+                    {"text": "No large lower wick", "explanation": "No strong buying pressure"}
+                ],
+                "explanation": "Second bearish candle confirms first wasn't a false signal"
+            })
+
+        # Step 4: Setup building
+        if confirmations >= 2:
+            steps.append({
+                "step": 4,
                 "status": "in_progress",
-                "title": "Price at demand zone",
-                "details": f"Support level: ${setup['key_level']:.2f}",
-                "explanation": "Waiting for reaction at this level"
-            }
-        ]
+                "title": "📉 Setup building momentum",
+                "details": f"Resistance holding at ${key_level:.2f}, price showing weakness",
+                "next": "Wait for 3rd bearish confirmation or enter on momentum",
+                "explanation": "Multiple rejections increase probability of successful SHORT"
+            })
+
+        # Step 5: Entry ready (if all confirmations)
+        if confirmations >= 3:
+            steps.append({
+                "step": 5,
+                "status": "ready",
+                "title": "🎯 READY TO ENTER SHORT",
+                "entry_options": [
+                    {
+                        "type": "Option A: Enter SHORT now (market order)",
+                        "trigger": f"SELL at current price: ${current_price:.2f}",
+                        "stop_loss": f"${key_level + 10:.2f}",
+                        "take_profit": f"Target support levels below",
+                        "pros": "Catch rejection at resistance",
+                        "cons": "Less confirmation"
+                    },
+                    {
+                        "type": "Option B: Wait for breakdown",
+                        "trigger": f"Wait for close BELOW ${key_level - 20:.2f}",
+                        "pros": "More confirmation, clearer direction",
+                        "cons": "Worse entry price"
+                    }
+                ],
+                "recommendation": "Option A for aggressive, Option B for conservative",
+                "explanation": "SUPPLY ZONE setup complete. Sellers defending resistance."
+            })
+
+        return steps
 
     def _scanning_steps(self) -> List[Dict[str, Any]]:
         """Default scanning state"""
@@ -931,10 +1078,10 @@ class BearishProTraderGold:
         key_level = setup.get("key_level", 0)
 
         # Pattern-specific invalidation conditions
-        if pattern_type == "BREAKDOWN_RETEST":  # BEARISH pattern type
+        if pattern_type == "BREAKDOWN_RETEST":  # BEARISH breakdown retest
             return self._breakout_retest_invalidation(setup, state, key_level)
-        elif pattern_type == "DEMAND_ZONE":
-            return self._demand_zone_invalidation(setup, state, key_level)
+        elif pattern_type == "SUPPLY_ZONE":  # BEARISH supply zone (resistance)
+            return self._supply_zone_invalidation(setup, state, key_level)
         else:
             return [
                 {
@@ -1047,28 +1194,82 @@ class BearishProTraderGold:
 
         return conditions
 
-    def _demand_zone_invalidation(self, setup: Dict, state: str, key_level: float) -> List[Dict[str, Any]]:
-        """Dynamic invalidation for Demand Zone pattern"""
-        return [
-            {
-                "condition": f"Price closes below ${key_level - 10:.2f}",
-                "reason": "Demand zone violated",
-                "action": "Cancel setup - zone failed",
+    def _supply_zone_invalidation(self, setup: Dict, state: str, key_level: float) -> List[Dict[str, Any]]:
+        """Dynamic invalidation for SUPPLY ZONE pattern (BEARISH resistance zone)"""
+        conditions = []
+
+        state = setup.get("state", "AT_ZONE")
+
+        # State-specific invalidations
+        if state == "AT_ZONE":
+            conditions.append({
+                "condition": f"Price closes ABOVE ${key_level + 10:.2f}",
+                "reason": "Resistance broken - supply zone failed",
+                "action": "Cancel setup immediately. Look for LONG instead.",
                 "severity": "CRITICAL"
-            },
-            {
-                "condition": "Multiple tests of zone without bounce",
-                "reason": "Zone is weak, being absorbed",
-                "action": "Setup failing, look elsewhere",
+            })
+            conditions.append({
+                "condition": "No bearish reaction within 3 candles",
+                "reason": "Sellers not showing up at resistance",
+                "action": "Zone may be weak, wait for confirmation",
                 "severity": "HIGH"
-            },
-            {
-                "condition": "No bullish reaction in zone",
-                "reason": "No buyers showing up",
-                "action": "Wait or cancel",
+            })
+
+        elif state == "WATCHING":
+            conditions.append({
+                "condition": f"Price closes decisively ABOVE ${key_level + 10:.2f}",
+                "reason": "Failed resistance - breakout occurring",
+                "action": "Setup INVALID. Cancel immediately.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Bullish candles forming at resistance",
+                "reason": "Buyers overwhelming sellers",
+                "action": "Setup failing, cancel and reverse bias",
+                "severity": "HIGH"
+            })
+
+        elif state == "REJECTION_CONFIRMED":
+            conditions.append({
+                "condition": f"Next candle closes ABOVE ${key_level:.2f}",
+                "reason": "Rejection failed - false signal",
+                "action": "Do NOT enter. Setup collapsed.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Strong bullish candle after rejection",
+                "reason": "Sellers gave up, buyers took control",
+                "action": "Cancel setup, look for longs",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "Low volume/Asian session starts",
+                "reason": "Low liquidity = unreliable moves",
+                "action": "Skip entry or reduce size",
                 "severity": "MEDIUM"
-            }
-        ]
+            })
+
+        # Universal invalidations
+        conditions.append({
+            "condition": f"Price rises ${(key_level * 0.01):.2f}+ ABOVE resistance",
+            "reason": "Major breakout (1% above resistance)",
+            "action": "Supply zone completely failed. Look elsewhere.",
+            "severity": "CRITICAL"
+        })
+        conditions.append({
+            "condition": "Multiple tests without breakdown",
+            "reason": "Resistance being absorbed, zone weakening",
+            "action": "Setup probability decreasing, consider canceling",
+            "severity": "HIGH"
+        })
+        conditions.append({
+            "condition": "Price consolidates AT resistance for 4+ candles",
+            "reason": "No seller conviction, likely to break UP",
+            "action": "Setup losing strength, prepare to cancel",
+            "severity": "MEDIUM"
+        })
+
+        return conditions
 
     def _convert_candles_to_json(self, df: pd.DataFrame) -> List[Dict[str, Any]]:
         """Convert pandas DataFrame with Timestamp index to JSON-safe format"""
