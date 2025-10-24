@@ -256,7 +256,12 @@ class BearishProTraderGold:
         Returns detailed pattern information
         """
         key_level = h4_levels["key_level"]
-        last_candles = h1_data.tail(10)
+        last_candles = h1_data.tail(20)  # Increased for FVG detection
+
+        # Check for FAIR VALUE GAP (FVG) - HIGHEST PRIORITY
+        fvg_setup = self._check_fvg(last_candles, current_price)
+        if fvg_setup["detected"]:
+            return fvg_setup
 
         # Check for BREAKDOWN RETEST pattern
         breakdown_setup = self._check_breakout_retest(last_candles, key_level, current_price)
@@ -365,6 +370,110 @@ class BearishProTraderGold:
             "expected_entry": current_price
         }
 
+    def _check_fvg(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+        """
+        Check for BEARISH Fair Value Gap (FVG) pattern:
+
+        FVG = 3-candle pattern where there's a GAP (imbalance) in price:
+        - Candle 1: Up move (creates the high)
+        - Candle 2: BIG bearish move (skips price levels)
+        - Candle 3: Continuation down (creates the low)
+
+        If Candle3.high < Candle1.low → There's a GAP!
+        The gap zone is unfilled price area where NO trades occurred
+        Price is magnetically pulled back UP to "fill" this gap
+        """
+        if len(candles) < 10:
+            return {"detected": False}
+
+        # Scan last 15 candles for FVG patterns
+        fvg_zones = []
+
+        for i in range(len(candles) - 3):
+            candle1 = candles.iloc[i]
+            candle2 = candles.iloc[i + 1]
+            candle3 = candles.iloc[i + 2]
+
+            # BEARISH FVG detection:
+            # Gap exists if candle3.high < candle1.low (price skipped the middle zone)
+            if candle3['high'] < candle1['low']:
+                gap_top = candle1['low']
+                gap_bottom = candle3['high']
+                gap_size = gap_top - gap_bottom
+
+                # Only consider significant gaps (> 5 pips)
+                if gap_size > 5:
+                    gap_midpoint = (gap_top + gap_bottom) / 2
+
+                    # Check if gap has been filled already
+                    filled = False
+                    for j in range(i + 3, len(candles)):
+                        if candles.iloc[j]['high'] >= gap_top:
+                            filled = True
+                            break
+
+                    if not filled:
+                        fvg_zones.append({
+                            "top": float(gap_top),
+                            "bottom": float(gap_bottom),
+                            "midpoint": float(gap_midpoint),
+                            "size": float(gap_size),
+                            "candle_index": i,
+                            "age_candles": len(candles) - i - 3
+                        })
+
+        # No unfilled FVGs found
+        if not fvg_zones:
+            return {"detected": False}
+
+        # Find nearest FVG above current price (price needs to rise to fill it)
+        fvgs_above = [fvg for fvg in fvg_zones if fvg["bottom"] > current_price]
+
+        if not fvgs_above:
+            return {"detected": False}
+
+        # Get the nearest FVG (closest to current price)
+        nearest_fvg = min(fvgs_above, key=lambda x: abs(current_price - x["midpoint"]))
+
+        # Check if price is approaching the FVG (within 20 pips)
+        distance_to_fvg = nearest_fvg["midpoint"] - current_price
+
+        if distance_to_fvg > 20:
+            return {"detected": False}  # Too far away
+
+        # Determine state based on proximity and price action
+        if current_price >= nearest_fvg["bottom"] and current_price <= nearest_fvg["top"]:
+            state = "IN_FVG"
+            progress = "3/5"
+            confirmations = 2
+        elif distance_to_fvg <= 10:
+            state = "APPROACHING"
+            progress = "2/5"
+            confirmations = 1
+        else:
+            state = "DETECTED"
+            progress = "1/5"
+            confirmations = 0
+
+        return {
+            "detected": True,
+            "pattern_type": "FAIR_VALUE_GAP",
+            "direction": "SHORT",
+            "state": state,
+            "progress": progress,
+            "key_level": nearest_fvg["midpoint"],
+            "confirmations": confirmations,
+            "expected_entry": nearest_fvg["midpoint"],
+            "fvg_zone": {
+                "top": nearest_fvg["top"],
+                "bottom": nearest_fvg["bottom"],
+                "midpoint": nearest_fvg["midpoint"],
+                "size_pips": nearest_fvg["size"],
+                "age_candles": nearest_fvg["age_candles"]
+            },
+            "distance_pips": float(distance_to_fvg)
+        }
+
     def _check_supply_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
         """
         Check for SUPPLY ZONE pattern (BEARISH):
@@ -464,7 +573,9 @@ class BearishProTraderGold:
         """
         pattern = setup.get("pattern_type", "SCANNING")
 
-        if pattern == "BREAKDOWN_RETEST":
+        if pattern == "FAIR_VALUE_GAP":
+            return self._fvg_steps(setup, current_price)
+        elif pattern == "BREAKDOWN_RETEST":
             return self._breakdown_retest_steps(setup, current_price, current_candle)
         elif pattern == "SUPPLY_ZONE":
             return self._supply_zone_steps(setup, current_price)
@@ -932,6 +1043,86 @@ class BearishProTraderGold:
 
         return steps
 
+    def _fvg_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
+        """
+        Create detailed steps for FAIR VALUE GAP (FVG) pattern - BEARISH
+        FVG = Price imbalance that acts like a magnet, pulling price UP to fill the gap
+        """
+        state = setup.get("state", "DETECTED")
+        fvg_zone = setup.get("fvg_zone", {})
+        distance = setup.get("distance_pips", 0)
+
+        steps = []
+
+        # Step 1: FVG Detected
+        steps.append({
+            "step": 1,
+            "status": "complete" if state in ["APPROACHING", "IN_FVG"] else "in_progress",
+            "title": "📊 Fair Value Gap Detected",
+            "details": f"FVG Zone: ${fvg_zone.get('bottom', 0):.2f} - ${fvg_zone.get('top', 0):.2f} ({fvg_zone.get('size_pips', 0):.1f} pips)",
+            "explanation": f"Unfilled gap from {fvg_zone.get('age_candles', 0)} candles ago. Price magnetically pulled to fill it. Currently {distance:.1f} pips away."
+        })
+
+        # Step 2: Price Approaching or Inside FVG
+        if state == "APPROACHING":
+            steps.append({
+                "step": 2,
+                "status": "in_progress",
+                "title": "⚠️ Price Approaching FVG",
+                "details": f"Distance to FVG: {distance:.1f} pips (within 10 pips)",
+                "explanation": "Price is rising toward the gap. Watch for bearish rejection reaction."
+            })
+        elif state == "IN_FVG":
+            steps.append({
+                "step": 2,
+                "status": "complete",
+                "title": "✅ Price Inside FVG",
+                "details": f"Current: ${current_price:.2f} (inside FVG zone)",
+                "explanation": "Price has reached the gap! High probability of bearish rejection."
+            })
+        else:
+            steps.append({
+                "step": 2,
+                "status": "waiting",
+                "title": "Waiting for price to approach FVG",
+                "details": f"Still {distance:.1f} pips away (need within 10 pips)",
+                "explanation": "Monitoring price action as it moves toward gap."
+            })
+
+        # Step 3: Entry Strategy (only when IN_FVG)
+        if state == "IN_FVG":
+            steps.append({
+                "step": 3,
+                "status": "ready",
+                "title": "🎯 READY TO ENTER",
+                "entry_options": [
+                    {
+                        "type": "Option A: Enter at FVG midpoint (Aggressive)",
+                        "trigger": f"Enter NOW at ${fvg_zone.get('midpoint', 0):.2f}",
+                        "pros": "Best entry price, highest R:R",
+                        "cons": "No confirmation candle"
+                    },
+                    {
+                        "type": "Option B: Wait for bearish confirmation (Conservative)",
+                        "trigger": "Wait for 1H bearish candle inside FVG zone",
+                        "pros": "Confirmation of sellers stepping in",
+                        "cons": "Slightly worse entry price"
+                    }
+                ],
+                "recommendation": "Option A for aggressive (FVG midpoint entry), Option B for conservative (wait for confirmation)",
+                "explanation": "FVG filled! Institutions left orders here. High probability of rejection DOWN."
+            })
+        else:
+            steps.append({
+                "step": 3,
+                "status": "waiting",
+                "title": "Entry criteria",
+                "details": "Waiting for price to reach FVG zone",
+                "explanation": "Entry signal will trigger when price enters the gap."
+            })
+
+        return steps
+
     def _scanning_steps(self) -> List[Dict[str, Any]]:
         """Default scanning state"""
         return [
@@ -1078,7 +1269,9 @@ class BearishProTraderGold:
         key_level = setup.get("key_level", 0)
 
         # Pattern-specific invalidation conditions
-        if pattern_type == "BREAKDOWN_RETEST":  # BEARISH breakdown retest
+        if pattern_type == "FAIR_VALUE_GAP":
+            return self._fvg_invalidation(setup, state, key_level)
+        elif pattern_type == "BREAKDOWN_RETEST":  # BEARISH breakdown retest
             return self._breakout_retest_invalidation(setup, state, key_level)
         elif pattern_type == "SUPPLY_ZONE":  # BEARISH supply zone (resistance)
             return self._supply_zone_invalidation(setup, state, key_level)
@@ -1189,6 +1382,74 @@ class BearishProTraderGold:
             "condition": f"Price rises ${(key_level * 0.01):.2f}+ ABOVE resistance",
             "reason": "Major resistance break (1% above key level)",
             "action": "Setup completely dead. Look for new pattern.",
+            "severity": "CRITICAL"
+        })
+
+        return conditions
+
+    def _fvg_invalidation(self, setup: Dict, state: str, key_level: float) -> List[Dict[str, Any]]:
+        """Dynamic invalidation for Fair Value Gap (FVG) pattern - BEARISH"""
+        fvg_zone = setup.get("fvg_zone", {})
+        gap_top = fvg_zone.get("top", key_level + 5)
+
+        conditions = []
+
+        state = setup.get("state", "DETECTED")
+
+        # State-specific invalidations
+        if state == "DETECTED":
+            conditions.append({
+                "condition": f"Price continues DOWN without filling FVG (${gap_top:.2f})",
+                "reason": "FVG may not be filled this time",
+                "action": "Wait or look for other setups",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "FVG becomes too old (20+ candles)",
+                "reason": "Older gaps less likely to be filled",
+                "action": "Consider setup stale",
+                "severity": "MEDIUM"
+            })
+
+        elif state == "APPROACHING":
+            conditions.append({
+                "condition": f"Price reverses DOWN before reaching FVG top (${gap_top:.2f})",
+                "reason": "Failed to fill the gap completely",
+                "action": "Setup invalidated - gap may not fill",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "Strong bearish momentum away from FVG",
+                "reason": "Market rejected the gap fill",
+                "action": "Cancel setup, look elsewhere",
+                "severity": "MEDIUM"
+            })
+
+        elif state == "IN_FVG":
+            conditions.append({
+                "condition": f"Price closes ABOVE gap top (${gap_top + 5:.2f})",
+                "reason": "Broke through FVG without rejecting",
+                "action": "Setup FAILED. FVG not respected.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Strong bullish candles through FVG",
+                "reason": "No sellers showing up, buyers in control",
+                "action": "Cancel setup immediately",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "Price consolidates in FVG for 4+ candles",
+                "reason": "Weak seller conviction",
+                "action": "Setup losing probability",
+                "severity": "MEDIUM"
+            })
+
+        # Universal FVG invalidations
+        conditions.append({
+            "condition": "FVG gets filled completely and price continues UP",
+            "reason": "Gap filled but sellers didn't step in",
+            "action": "Setup failed - no reaction at FVG",
             "severity": "CRITICAL"
         })
 
