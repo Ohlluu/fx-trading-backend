@@ -12,200 +12,7 @@ from datetime import datetime, timedelta
 import pytz
 from .datafeed import fetch_h1
 from .current_price import get_current_xauusd_price
-
-class MultiTimeframeCache:
-    """
-    Caches multi-timeframe data with market-aligned expiry times
-    D1: Updates at 5pm NY (4pm CT, 9pm UTC) when daily candle closes
-    H4: Updates every 4 hours on the 4H candle close
-    H1: Updates every hour on the hour
-    """
-
-    def __init__(self):
-        self.cache = {
-            "D1": {"data": None, "last_update": None},
-            "H4": {"data": None, "last_update": None},
-            "H1": {"data": None, "last_update": None}
-        }
-
-    def is_expired(self, timeframe: str) -> bool:
-        """
-        Check if cached data has expired based on market times
-        D1: Expires after 5pm NY (daily close)
-        H4: Expires every 4 hours
-        H1: Expires every hour
-        """
-        cache_entry = self.cache.get(timeframe)
-        if not cache_entry or cache_entry["data"] is None or cache_entry["last_update"] is None:
-            return True
-
-        now = datetime.now(pytz.UTC)
-        last_update = cache_entry["last_update"]
-
-        if timeframe == "D1":
-            # Daily candle closes at 5pm NY = 9pm UTC (or 10pm UTC during winter)
-            # Check if we've passed the daily close time since last update
-            ny_tz = pytz.timezone('America/New_York')
-            now_ny = now.astimezone(ny_tz)
-            last_update_ny = last_update.astimezone(ny_tz)
-
-            # Daily close is at 5pm NY
-            daily_close_hour = 17
-
-            # If last update was before today's 5pm close and now is after, expired
-            today_close = now_ny.replace(hour=daily_close_hour, minute=0, second=0, microsecond=0)
-            yesterday_close = today_close - timedelta(days=1)
-
-            # If last update was before the most recent close, it's expired
-            if last_update_ny < today_close <= now_ny:
-                return True
-            elif last_update_ny < yesterday_close:
-                return True
-
-            return False
-
-        elif timeframe == "H4":
-            # H4 expires at actual 4-hour candle boundaries
-            # H4 candles close at: 5pm, 9pm, 1am, 5am, 9am, 1pm NY (4pm, 8pm, 12am, 4am, 8am, 12pm CT)
-            ny_tz = pytz.timezone('America/New_York')
-            now_ny = now.astimezone(ny_tz)
-            last_update_ny = last_update.astimezone(ny_tz)
-
-            # H4 candles close at hours: 1, 5, 9, 13, 17, 21 (NY time)
-            h4_close_hours = [1, 5, 9, 13, 17, 21]
-
-            # Find the most recent H4 close
-            current_hour = now_ny.hour
-            most_recent_close_hour = max([h for h in h4_close_hours if h <= current_hour], default=21)
-
-            # If current hour is before the first close of the day, use yesterday's last close
-            if current_hour < h4_close_hours[0]:
-                most_recent_close = now_ny.replace(hour=h4_close_hours[-1], minute=0, second=0, microsecond=0) - timedelta(days=1)
-            else:
-                most_recent_close = now_ny.replace(hour=most_recent_close_hour, minute=0, second=0, microsecond=0)
-
-            # If last update was before the most recent close, it's expired
-            if last_update_ny < most_recent_close:
-                return True
-
-            return False
-
-        elif timeframe == "H1":
-            # H1 expires at actual hour boundaries (top of each hour)
-            # If we're at 7:45pm and last update was at 6:30pm, we've passed 7:00pm close
-            last_update_hour_boundary = last_update.replace(minute=0, second=0, microsecond=0)
-            current_hour_boundary = now.replace(minute=0, second=0, microsecond=0)
-
-            # If we've moved to a new hour, the cache is expired
-            if current_hour_boundary > last_update_hour_boundary:
-                return True
-
-            return False
-
-        return True
-
-    def get(self, timeframe: str):
-        """Get cached data if not expired"""
-        if self.is_expired(timeframe):
-            return None
-        return self.cache[timeframe]["data"]
-
-    def set(self, timeframe: str, data):
-        """Store data in cache"""
-        self.cache[timeframe]["data"] = data
-        self.cache[timeframe]["last_update"] = datetime.now(pytz.UTC)
-
-    def get_last_update(self, timeframe: str) -> Optional[datetime]:
-        """Get last update time for timeframe"""
-        return self.cache[timeframe].get("last_update")
-
-    def get_next_update(self, timeframe: str) -> str:
-        """
-        Calculate when next update will occur based on market times
-        D1: Next 5pm NY daily close
-        H4: Next 4-hour boundary
-        H1: Next hour boundary
-        """
-        now = datetime.now(pytz.UTC)
-        chicago_tz = pytz.timezone('America/Chicago')
-        ny_tz = pytz.timezone('America/New_York')
-
-        if timeframe == "D1":
-            # Next daily close is 5pm NY (4pm CT)
-            now_ny = now.astimezone(ny_tz)
-            today_close = now_ny.replace(hour=17, minute=0, second=0, microsecond=0)
-
-            if now_ny >= today_close:
-                # Already passed today's close, next is tomorrow
-                next_close = today_close + timedelta(days=1)
-            else:
-                # Haven't reached today's close yet
-                next_close = today_close
-
-            # Convert to Chicago for display
-            next_close_ct = next_close.astimezone(chicago_tz)
-            time_until = next_close.astimezone(pytz.UTC) - now
-            hours = int(time_until.total_seconds() / 3600)
-            minutes = int((time_until.total_seconds() % 3600) / 60)
-
-            if hours > 0:
-                return f"Next update: {next_close_ct.strftime('%I:%M %p CT')} (in {hours}h {minutes}m)"
-            else:
-                return f"Next update: {next_close_ct.strftime('%I:%M %p CT')} (in {minutes}m)"
-
-        elif timeframe == "H4":
-            # Next H4 candle close at actual market boundaries
-            # H4 closes at: 1am, 5am, 9am, 1pm, 5pm, 9pm NY
-            now_ny = now.astimezone(ny_tz)
-            h4_close_hours = [1, 5, 9, 13, 17, 21]
-
-            # Find next H4 close
-            current_hour = now_ny.hour
-            next_close_hour = None
-
-            for h in h4_close_hours:
-                if h > current_hour:
-                    next_close_hour = h
-                    break
-
-            if next_close_hour is None:
-                # Next close is tomorrow's first close
-                next_close = now_ny.replace(hour=h4_close_hours[0], minute=0, second=0, microsecond=0) + timedelta(days=1)
-            else:
-                next_close = now_ny.replace(hour=next_close_hour, minute=0, second=0, microsecond=0)
-
-            # Convert to Chicago for display
-            next_close_ct = next_close.astimezone(chicago_tz)
-            time_until = next_close.astimezone(pytz.UTC) - now
-            hours = int(time_until.total_seconds() / 3600)
-            minutes = int((time_until.total_seconds() % 3600) / 60)
-
-            if hours > 0:
-                return f"Next update: {next_close_ct.strftime('%I:%M %p CT')} (in {hours}h {minutes}m)"
-            else:
-                return f"Next update: {next_close_ct.strftime('%I:%M %p CT')} (in {minutes}m)"
-
-        elif timeframe == "H1":
-            # Next H1 candle close at top of next hour
-            now_ct = now.astimezone(chicago_tz)
-
-            # Next hour boundary
-            if now_ct.minute == 0 and now_ct.second == 0:
-                # Exactly on the hour
-                next_hour = now_ct + timedelta(hours=1)
-            else:
-                # Find next hour
-                next_hour = now_ct.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-
-            time_until = next_hour.astimezone(pytz.UTC) - now
-            minutes = int(time_until.total_seconds() / 60)
-
-            return f"Next update: {next_hour.strftime('%I:%M %p CT')} (in {minutes}m)"
-
-        return "Unknown"
-
-# Global MTF cache
-mtf_cache = MultiTimeframeCache()
+from .mtf_cache import mtf_cache  # Import shared cache
 
 class BearishProTraderGold:
     """
@@ -634,12 +441,12 @@ class BearishProTraderGold:
 
     def _build_setup_steps(self, setup: Dict, current_price: float, current_candle: Dict) -> List[Dict[str, Any]]:
         """
-        Build step-by-step breakdown based on pattern type
+        Build step-by-step breakdown based on pattern type (BEARISH)
         """
         pattern = setup.get("pattern_type", "SCANNING")
 
-        if pattern == "BREAKOUT_RETEST":
-            return self._breakout_retest_steps(setup, current_price, current_candle)
+        if pattern == "BREAKDOWN_RETEST":
+            return self._breakdown_retest_steps(setup, current_price, current_candle)
         elif pattern == "DEMAND_ZONE":
             return self._demand_zone_steps(setup, current_price)
         else:
@@ -813,6 +620,174 @@ class BearishProTraderGold:
 
         return steps
 
+    def _breakdown_retest_steps(self, setup: Dict, current_price: float, current_candle: Dict) -> List[Dict[str, Any]]:
+        """
+        Create detailed steps for BEARISH Breakdown Retest pattern (SHORT direction)
+        """
+        key_level = setup["key_level"]
+        state = setup["state"]
+        breakdown_candle = setup.get("breakdown_candle")
+        retest_candle = setup.get("retest_candle")
+
+        steps = []
+
+        # Step 1: Breakdown
+        steps.append({
+            "step": 1,
+            "status": "complete",
+            "title": f"Price broke BELOW ${key_level:.2f} support",
+            "details": f"Confirmed at {breakdown_candle['time']} (1H candle closed at ${breakdown_candle['price']:.2f})",
+            "explanation": "This shows strong selling pressure. The level that was support is now resistance."
+        })
+
+        # Step 2: Retest/Pullback
+        if retest_candle:
+            steps.append({
+                "step": 2,
+                "status": "complete",
+                "title": f"Price pulled back UP to test ${key_level:.2f}",
+                "details": f"Retest happening now at ${retest_candle['price']:.2f}",
+                "explanation": "Healthy pullback. Professional traders use this to enter SHORT at better price."
+            })
+        else:
+            steps.append({
+                "step": 2,
+                "status": "waiting",
+                "title": f"WAITING for pullback UP to ${key_level:.2f}",
+                "details": f"Current: ${current_price:.2f} ({key_level - current_price:.2f} pips below)",
+                "explanation": "Waiting for price to bounce back up. This creates the 'retest' opportunity."
+            })
+            return steps
+
+        # Step 3: Rejection Candle
+        if state in ["REJECTION_WAITING", "CONFIRMATION_WAITING", "READY_TO_ENTER"]:
+            wick_touched = current_candle['high'] >= key_level - 2
+
+            if state == "REJECTION_WAITING":
+                # Calculate if early entry conditions are met
+                minutes_elapsed = 60 - current_candle['time_remaining']
+                price_holding_weak = current_price < key_level - 5
+                early_entry_available = wick_touched and minutes_elapsed >= 20 and price_holding_weak
+
+                steps.append({
+                    "step": 3,
+                    "status": "in_progress",
+                    "title": "⏳ WATCHING CURRENT CANDLE for bearish rejection",
+                    "details": f"Candle: {current_candle['candle_start']} ({minutes_elapsed}/60 mins complete)",
+                    "current_values": {
+                        "high": f"${current_candle['high']:.2f}",
+                        "current_price": f"${current_price:.2f}",
+                        "target_level": f"${key_level:.2f}"
+                    },
+                    "watching_for": {
+                        "wick_requirement": {
+                            "status": "✅ Complete" if wick_touched else "⏳ Waiting",
+                            "text": f"Wick must touch ${key_level:.2f} (resistance)",
+                            "current": f"High: ${current_candle['high']:.2f}",
+                            "explanation": "The wick shows buyers tried to push higher but failed."
+                        },
+                        "holding_requirement": {
+                            "status": "✅ Complete" if (wick_touched and minutes_elapsed >= 20) else "⏳ Waiting",
+                            "text": f"Price holding BELOW ${key_level - 5:.2f} for 20+ minutes",
+                            "current": f"Currently: ${current_price:.2f} ({minutes_elapsed} mins elapsed)",
+                            "explanation": "Price staying weak shows sellers are in control."
+                        },
+                        "close_requirement": {
+                            "status": "⏳ Watching",
+                            "text": f"Candle must close BELOW ${key_level - 5:.2f}",
+                            "current": f"Currently: ${current_price:.2f}",
+                            "time_left": f"{current_candle['time_remaining']} minutes until close",
+                            "explanation": "Close below confirms sellers won the battle."
+                        }
+                    },
+                    "entry_timing": {
+                        "early_entry": {
+                            "available": early_entry_available,
+                            "type": "🟡 EARLY ENTRY (50% Position)",
+                            "status": "AVAILABLE NOW" if early_entry_available else "NOT READY",
+                            "trigger": f"Wick touched + holding BELOW ${key_level - 5:.2f} for 20+ mins",
+                            "entry_price": f"${current_price:.2f} (market order SHORT)",
+                            "stop_loss": f"${key_level + 5:.2f}",
+                            "position_size": "50% of planned trade",
+                            "pros": "✓ Catch more of the move DOWN\n✓ Better average entry price\n✓ Psychological confidence",
+                            "cons": "⚠ Candle could still reverse UP\n⚠ {0} mins until confirmation".format(current_candle['time_remaining']),
+                            "action": "Enter 50% SHORT position NOW if confident" if early_entry_available else f"Wait {20 - minutes_elapsed} more minutes"
+                        },
+                        "confirmation_entry": {
+                            "type": "🟢 CONFIRMATION ENTRY (Add 50% More)",
+                            "trigger": f"Candle closes BELOW ${key_level - 5:.2f}",
+                            "expected_time": current_candle['candle_close_expected'],
+                            "time_remaining": f"{current_candle['time_remaining']} minutes",
+                            "entry_price": f"~${current_price - 2:.2f}-${current_price - 5:.2f} (estimated)",
+                            "position_size": "Add remaining 50% SHORT",
+                            "pros": "✓ Fully confirmed setup\n✓ High confidence\n✓ Clear invalidation",
+                            "cons": "⚠ Slightly worse price\n⚠ Might miss fast moves",
+                            "action": "Add second 50% SHORT if candle closes weak"
+                        },
+                        "recommended": "Start with 50% early SHORT entry (if available), add 50% on confirmation. This balances catching the move while managing risk."
+                    },
+                    "explanation": "This candle tells us if resistance holds. Long UPPER wick + bearish close = sellers defending."
+                })
+            else:
+                steps.append({
+                    "step": 3,
+                    "status": "complete",
+                    "title": "✅ Bearish rejection candle confirmed",
+                    "details": f"Wick touched ${current_candle['high']:.2f}, closed bearish",
+                    "explanation": "Perfect rejection! Sellers defended resistance. High probability SHORT setup forming."
+                })
+
+        # Step 4: Confirmation
+        if state in ["CONFIRMATION_WAITING", "READY_TO_ENTER"]:
+            if state == "CONFIRMATION_WAITING":
+                steps.append({
+                    "step": 4,
+                    "status": "waiting",
+                    "title": "WAITING for confirmation candle",
+                    "details": f"Next candle starts at {current_candle['candle_close_expected']}",
+                    "requirements": [
+                        {"text": f"Close BELOW ${key_level - 10:.2f}", "explanation": "Shows downward momentum continuing"},
+                        {"text": "Red/bearish candle", "explanation": "Sellers in control"},
+                        {"text": "No large upper wick", "explanation": "No heavy buying"}
+                    ],
+                    "explanation": "Second confirmation proves first wasn't a fluke."
+                })
+            else:
+                steps.append({
+                    "step": 4,
+                    "status": "complete",
+                    "title": "✅ Confirmation candle completed",
+                    "details": "Bearish continuation confirmed",
+                    "explanation": "Setup validated by multiple confirmations."
+                })
+
+        # Step 5: Entry
+        if state == "READY_TO_ENTER":
+            steps.append({
+                "step": 5,
+                "status": "ready",
+                "title": "🎯 READY TO ENTER SHORT",
+                "entry_options": [
+                    {
+                        "type": "Option A: Wait for 3rd bearish candle",
+                        "trigger": f"When next 1H candle closes BELOW ${current_price:.2f}",
+                        "current_count": f"{setup['confirmations']}/3 complete",
+                        "pros": "Safest - most confirmation",
+                        "cons": "Might miss some entry price"
+                    },
+                    {
+                        "type": "Option B: Enter SHORT now (market order)",
+                        "trigger": f"Enter SHORT at current price: ${current_price:.2f}",
+                        "pros": "Catch current price level",
+                        "cons": "Less confirmation"
+                    }
+                ],
+                "recommendation": "Option A for conservative, Option B if downward momentum building",
+                "explanation": "SHORT setup complete. Choose entry method based on your style."
+            })
+
+        return steps
+
     def _demand_zone_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
         """Steps for demand zone pattern"""
         return [
@@ -971,7 +946,7 @@ class BearishProTraderGold:
         key_level = setup.get("key_level", 0)
 
         # Pattern-specific invalidation conditions
-        if pattern_type == "BREAKOUT_RETEST":
+        if pattern_type == "BREAKDOWN_RETEST":  # BEARISH pattern type
             return self._breakout_retest_invalidation(setup, state, key_level)
         elif pattern_type == "DEMAND_ZONE":
             return self._demand_zone_invalidation(setup, state, key_level)
