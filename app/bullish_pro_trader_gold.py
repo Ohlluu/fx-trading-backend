@@ -264,6 +264,12 @@ class BullishProTraderGold:
         if fvg_setup["detected"]:
             return fvg_setup
 
+        # Check for ORDER BLOCK - SECOND PRIORITY
+        # Order Block = last bullish candle before strong move (institutional orders)
+        ob_setup = self._check_order_block(last_candles, current_price)
+        if ob_setup["detected"]:
+            return ob_setup
+
         # Check for BREAKOUT RETEST pattern
         breakout_setup = self._check_breakout_retest(last_candles, key_level, current_price)
         if breakout_setup["detected"]:
@@ -506,6 +512,132 @@ class BullishProTraderGold:
             "distance_pips": float(distance_to_fvg)
         }
 
+    def _check_order_block(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+        """
+        Check for BULLISH Order Block pattern:
+
+        Order Block = Last BULLISH candle before a strong UPWARD move
+        This is where institutions (smart money) placed their BUY orders.
+        When price returns to this level, those orders get filled = bounce UP.
+
+        BULLISH ORDER BLOCK:
+        1. Find a strong bullish move (e.g., 3+ consecutive bullish candles or big single candle)
+        2. Identify the LAST bullish candle BEFORE that move
+        3. That candle's body (open to close) is the Order Block zone
+        4. When price returns to that zone, expect bounce UP
+        """
+        if len(candles) < 10:
+            return {"detected": False}
+
+        order_blocks = []
+
+        # Scan for strong bullish moves and identify their order blocks
+        for i in range(5, len(candles) - 2):
+            # Check if there's a strong bullish move starting at candle i
+            strong_move = False
+
+            # Method 1: Check for 3 consecutive bullish candles
+            if (candles.iloc[i]['close'] > candles.iloc[i]['open'] and
+                candles.iloc[i+1]['close'] > candles.iloc[i+1]['open'] and
+                candles.iloc[i+2]['close'] > candles.iloc[i+2]['open']):
+
+                # Calculate total move size
+                move_size = candles.iloc[i+2]['close'] - candles.iloc[i]['open']
+                if move_size > 15:  # Significant move (15+ pips)
+                    strong_move = True
+
+            # Method 2: Check for single large bullish candle
+            if not strong_move:
+                single_candle_move = candles.iloc[i]['close'] - candles.iloc[i]['open']
+                if single_candle_move > 20:  # Large single candle (20+ pips)
+                    strong_move = True
+
+            if strong_move:
+                # Find the LAST bullish candle BEFORE this move
+                # Look back from candle (i-1)
+                for j in range(i-1, max(0, i-5), -1):
+                    prev_candle = candles.iloc[j]
+                    if prev_candle['close'] > prev_candle['open']:  # Bullish candle
+                        # This is the Order Block!
+                        ob_top = prev_candle['close']
+                        ob_bottom = prev_candle['open']
+                        ob_midpoint = (ob_top + ob_bottom) / 2
+                        ob_size = ob_top - ob_bottom
+
+                        if ob_size > 3:  # Only significant order blocks (3+ pips)
+                            # Check if this OB has been mitigated (price returned and closed below it)
+                            mitigated = False
+                            for k in range(j+1, len(candles)):
+                                if candles.iloc[k]['close'] < ob_bottom:
+                                    mitigated = True
+                                    break
+
+                            if not mitigated:
+                                order_blocks.append({
+                                    "top": float(ob_top),
+                                    "bottom": float(ob_bottom),
+                                    "midpoint": float(ob_midpoint),
+                                    "size": float(ob_size),
+                                    "candle_index": j,
+                                    "age_candles": len(candles) - j - 1
+                                })
+                        break  # Found the order block for this move
+
+        # No order blocks found
+        if not order_blocks:
+            return {"detected": False}
+
+        # Find order blocks BELOW current price (price needs to drop to reach them)
+        obs_below = [ob for ob in order_blocks if ob["top"] < current_price]
+
+        if not obs_below:
+            return {"detected": False}
+
+        # Get the nearest order block (closest to current price)
+        nearest_ob = min(obs_below, key=lambda x: abs(current_price - x["midpoint"]))
+
+        # Check if price is approaching the OB (within 20 pips)
+        distance_to_ob = current_price - nearest_ob["midpoint"]
+
+        if distance_to_ob > 20:
+            return {"detected": False}  # Too far away
+
+        # Determine state based on proximity
+        if current_price <= nearest_ob["top"] and current_price >= nearest_ob["bottom"]:
+            # Price is INSIDE the order block (filling orders now!)
+            state = "IN_ORDER_BLOCK"
+            progress = "3/5"
+            confirmations = 2
+        elif distance_to_ob <= 10:
+            # Price is very close (within 10 pips)
+            state = "APPROACHING"
+            progress = "2/5"
+            confirmations = 1
+        else:
+            # Price is nearby (10-20 pips away)
+            state = "DETECTED"
+            progress = "1/5"
+            confirmations = 0
+
+        return {
+            "detected": True,
+            "pattern_type": "ORDER_BLOCK",
+            "direction": "LONG",
+            "state": state,
+            "progress": progress,
+            "key_level": nearest_ob["midpoint"],
+            "confirmations": confirmations,
+            "expected_entry": nearest_ob["midpoint"],
+            "order_block_zone": {
+                "top": nearest_ob["top"],
+                "bottom": nearest_ob["bottom"],
+                "midpoint": nearest_ob["midpoint"],
+                "size_pips": nearest_ob["size"],
+                "age_candles": nearest_ob["age_candles"]
+            },
+            "distance_pips": float(distance_to_ob)
+        }
+
     def _get_current_candle_info(self, h1_data: pd.DataFrame, current_price: float) -> Dict[str, Any]:
         """
         Get details about the currently forming 1H candle
@@ -547,6 +679,8 @@ class BullishProTraderGold:
 
         if pattern == "FAIR_VALUE_GAP":
             return self._fvg_steps(setup, current_price)
+        elif pattern == "ORDER_BLOCK":
+            return self._order_block_steps(setup, current_price)
         elif pattern == "BREAKOUT_RETEST":
             return self._breakout_retest_steps(setup, current_price, current_candle)
         elif pattern == "DEMAND_ZONE":
@@ -828,6 +962,87 @@ class BullishProTraderGold:
 
         return steps
 
+    def _order_block_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
+        """
+        Create detailed steps for ORDER BLOCK pattern
+        Order Block = Last bullish candle before strong move = Institutional buy orders
+        When price returns to this level, those orders get filled = bounce UP
+        """
+        state = setup.get("state", "DETECTED")
+        ob_zone = setup.get("order_block", {})
+        distance = setup.get("distance_pips", 0)
+
+        steps = []
+
+        # Step 1: Order Block Detected
+        steps.append({
+            "step": 1,
+            "status": "complete" if state in ["APPROACHING", "IN_OB"] else "in_progress",
+            "title": "📦 Order Block Detected",
+            "details": f"OB Zone: ${ob_zone.get('bottom', 0):.2f} - ${ob_zone.get('top', 0):.2f} ({ob_zone.get('size_pips', 0):.1f} pips)",
+            "explanation": f"Institutional BUY orders placed {ob_zone.get('age_candles', 0)} candles ago. Currently {distance:.1f} pips away."
+        })
+
+        # Step 2: Price Approaching or Inside OB
+        if state == "APPROACHING":
+            steps.append({
+                "step": 2,
+                "status": "in_progress",
+                "title": "⚠️ Price Approaching Order Block",
+                "details": f"Distance to OB: {distance:.1f} pips (within 10 pips)",
+                "explanation": "Price is dropping toward the institutional order zone. Watch for bounce reaction."
+            })
+        elif state == "IN_OB":
+            steps.append({
+                "step": 2,
+                "status": "complete",
+                "title": "✅ Price Inside Order Block",
+                "details": f"Current: ${current_price:.2f} (inside OB zone)",
+                "explanation": "Price has reached the institutional order zone. High probability of bounce."
+            })
+        else:
+            steps.append({
+                "step": 2,
+                "status": "waiting",
+                "title": "Waiting for price to approach OB",
+                "details": f"Still {distance:.1f} pips away (need within 10 pips)",
+                "explanation": "Monitoring price action as it moves toward order block."
+            })
+
+        # Step 3: Entry Strategy (only when IN_OB)
+        if state == "IN_OB":
+            steps.append({
+                "step": 3,
+                "status": "ready",
+                "title": "🎯 READY TO ENTER",
+                "entry_options": [
+                    {
+                        "type": "Option A: Enter at OB midpoint (Aggressive)",
+                        "trigger": f"Enter NOW at ${ob_zone.get('midpoint', 0):.2f}",
+                        "pros": "Best entry price, highest R:R",
+                        "cons": "No confirmation candle"
+                    },
+                    {
+                        "type": "Option B: Wait for bullish confirmation (Conservative)",
+                        "trigger": "Wait for 1H bullish candle inside OB zone",
+                        "pros": "Confirmation of buyers stepping in",
+                        "cons": "Slightly worse entry price"
+                    }
+                ],
+                "recommendation": "Option A for aggressive (OB midpoint entry), Option B for conservative (wait for confirmation)",
+                "explanation": "Order Block activated! Institutions left BUY orders here. High probability of bounce UP."
+            })
+        else:
+            steps.append({
+                "step": 3,
+                "status": "waiting",
+                "title": "Entry criteria",
+                "details": "Waiting for price to reach order block zone",
+                "explanation": "Entry signal will trigger when price enters the OB."
+            })
+
+        return steps
+
     def _scanning_steps(self) -> List[Dict[str, Any]]:
         """Default scanning state"""
         return [
@@ -976,6 +1191,8 @@ class BullishProTraderGold:
         # Pattern-specific invalidation conditions
         if pattern_type == "FAIR_VALUE_GAP":
             return self._fvg_invalidation(setup, state, key_level)
+        elif pattern_type == "ORDER_BLOCK":
+            return self._order_block_invalidation(setup, state, key_level)
         elif pattern_type == "BREAKOUT_RETEST":
             return self._breakout_retest_invalidation(setup, state, key_level)
         elif pattern_type == "DEMAND_ZONE":
@@ -1150,6 +1367,80 @@ class BullishProTraderGold:
             "condition": "FVG gets filled completely and price continues DOWN",
             "reason": "Gap filled but buyers didn't step in",
             "action": "Setup failed - no reaction at FVG",
+            "severity": "CRITICAL"
+        })
+
+        return conditions
+
+    def _order_block_invalidation(self, setup: Dict, state: str, key_level: float) -> List[Dict[str, Any]]:
+        """Dynamic invalidation for ORDER BLOCK pattern"""
+        ob_zone = setup.get("order_block", {})
+        ob_bottom = ob_zone.get("bottom", key_level - 3)
+
+        conditions = []
+
+        state = setup.get("state", "DETECTED")
+
+        # State-specific invalidations
+        if state == "DETECTED":
+            conditions.append({
+                "condition": f"Price continues UP without reaching OB (${ob_bottom:.2f})",
+                "reason": "Order Block may not be tested this time",
+                "action": "Wait or look for other setups",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "Order Block becomes too old (15+ candles)",
+                "reason": "Older order blocks less likely to be respected",
+                "action": "Consider setup stale",
+                "severity": "MEDIUM"
+            })
+
+        elif state == "APPROACHING":
+            conditions.append({
+                "condition": f"Price reverses UP before reaching OB bottom (${ob_bottom:.2f})",
+                "reason": "Failed to test the order block completely",
+                "action": "Setup invalidated - OB not tested",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "Strong bullish momentum away from OB",
+                "reason": "Market rejected the pullback",
+                "action": "Cancel setup, look elsewhere",
+                "severity": "MEDIUM"
+            })
+
+        elif state == "IN_OB":
+            conditions.append({
+                "condition": f"Price closes BELOW OB bottom (${ob_bottom - 3:.2f})",
+                "reason": "Broke through order block = mitigated/absorbed",
+                "action": "Setup FAILED. Institutional orders absorbed.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "Strong bearish candles through OB",
+                "reason": "No buyers showing up, sellers overwhelming",
+                "action": "Cancel setup immediately",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": "Price consolidates in OB for 4+ candles",
+                "reason": "Weak buyer conviction at order block",
+                "action": "Setup losing probability",
+                "severity": "MEDIUM"
+            })
+
+        # Universal ORDER BLOCK invalidations
+        conditions.append({
+            "condition": "OB gets tested and price continues DOWN",
+            "reason": "Order block tested but buyers didn't step in",
+            "action": "Setup failed - OB not respected",
+            "severity": "CRITICAL"
+        })
+        conditions.append({
+            "condition": "Previous H4 support breaks (strong bearish structure)",
+            "reason": "Overall market structure turned bearish",
+            "action": "All bullish setups invalid",
             "severity": "CRITICAL"
         })
 
