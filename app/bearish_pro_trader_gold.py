@@ -986,69 +986,73 @@ class BearishProTraderGold:
             ]
 
     def _breakout_retest_invalidation(self, setup: Dict, state: str, key_level: float) -> List[Dict[str, Any]]:
-        """Dynamic invalidation for Breakout Retest pattern based on current state"""
+        """Dynamic invalidation for BEARISH Breakdown Retest pattern - FLIPPED for SHORT"""
         conditions = []
 
-        # State-specific invalidations
+        # State-specific invalidations (BEARISH - opposite of bullish!)
         if state == "BREAKOUT_CONFIRMED":
+            # For bearish: If price closes ABOVE resistance after breakdown, setup fails
             conditions.append({
-                "condition": f"Price closes back below ${key_level:.2f}",
-                "reason": "Breakout failed - false breakout",
+                "condition": f"Price closes back ABOVE ${key_level:.2f}",
+                "reason": "Breakdown failed - false breakdown",
                 "action": "Cancel setup immediately. This was a trap.",
                 "severity": "CRITICAL"
             })
             conditions.append({
-                "condition": "Price doesn't pull back within 4 candles",
-                "reason": "Ran away without retest opportunity",
+                "condition": "Price doesn't pull back UP within 4 candles",
+                "reason": "Fell away without retest opportunity",
                 "action": "Setup expired - wait for new pattern",
                 "severity": "HIGH"
             })
 
         elif state == "RETEST_HAPPENING":
+            # For bearish: If price closes ABOVE resistance, retest failed
             conditions.append({
-                "condition": f"Current candle closes below ${key_level - 5:.2f}",
-                "reason": "Retest failed - buyers didn't defend",
-                "action": "Cancel setup. Support broken = bearish",
+                "condition": f"Current candle closes ABOVE ${key_level + 5:.2f}",
+                "reason": "Retest failed - sellers didn't defend",
+                "action": "Cancel setup. Resistance broken = bullish",
                 "severity": "CRITICAL"
             })
             conditions.append({
-                "condition": "Candle wick goes below support but closes weak",
-                "reason": "Wick is good, but weak close = no buyers",
+                "condition": "Candle wick goes ABOVE resistance but closes weak",
+                "reason": "Wick is good, but weak close = no sellers",
                 "action": "Wait for next candle confirmation",
                 "severity": "HIGH"
             })
 
         elif state == "REJECTION_WAITING":
+            # For bearish: If price closes ABOVE resistance, rejection failed
             conditions.append({
-                "condition": f"Candle closes below ${key_level:.2f}",
-                "reason": "Failed to reject from support - breakdown",
+                "condition": f"Candle closes ABOVE ${key_level:.2f}",
+                "reason": "Failed to reject from resistance - breakout",
                 "action": "Setup INVALID. Exit if entered early.",
                 "severity": "CRITICAL"
             })
             conditions.append({
-                "condition": "Wick doesn't touch support by candle close",
-                "reason": "No actual test of support = fake setup",
-                "action": "Cancel. Must see wick touch support.",
+                "condition": "Wick doesn't touch resistance by candle close",
+                "reason": "No actual test of resistance = fake setup",
+                "action": "Cancel. Must see wick touch resistance.",
                 "severity": "HIGH"
             })
             conditions.append({
-                "condition": "Price stays below key level for 15+ minutes",
-                "reason": "Sitting below support = weak buyers",
+                "condition": "Price stays ABOVE key level for 15+ minutes",
+                "reason": "Sitting above resistance = weak sellers",
                 "action": "Probably invalidated, wait for close",
                 "severity": "MEDIUM"
             })
 
         elif state == "CONFIRMATION_WAITING":
+            # For bearish: If next candle closes ABOVE resistance, setup dead
             conditions.append({
-                "condition": f"Next candle closes below ${key_level:.2f}",
-                "reason": "Rejection failed - price broke down after",
+                "condition": f"Next candle closes ABOVE ${key_level:.2f}",
+                "reason": "Rejection failed - price broke UP after",
                 "action": "Setup dead. Do not enter.",
                 "severity": "CRITICAL"
             })
             conditions.append({
-                "condition": "Next candle makes lower low",
-                "reason": "Creating bearish structure - trend down",
-                "action": "Cancel setup, look for shorts instead",
+                "condition": "Next candle makes higher high",
+                "reason": "Creating bullish structure - trend up",
+                "action": "Cancel setup, look for longs instead",
                 "severity": "HIGH"
             })
             conditions.append({
@@ -1059,23 +1063,24 @@ class BearishProTraderGold:
             })
 
         elif state == "READY_TO_ENTER":
+            # For bearish: If entry candle closes ABOVE resistance, setup failed
             conditions.append({
-                "condition": f"Entry candle closes below ${key_level:.2f}",
+                "condition": f"Entry candle closes ABOVE ${key_level:.2f}",
                 "reason": "Setup collapsed on entry candle",
                 "action": "Do NOT enter. Setup failed.",
                 "severity": "CRITICAL"
             })
             conditions.append({
-                "condition": "Strong bearish candle forms",
-                "reason": "Momentum shifted bearish",
+                "condition": "Strong BULLISH candle forms",
+                "reason": "Momentum shifted bullish",
                 "action": "Cancel entry, setup invalid",
                 "severity": "HIGH"
             })
 
-        # Universal invalidations (apply to all states)
+        # Universal invalidations (BEARISH - price goes UP kills setup)
         conditions.append({
-            "condition": f"Price falls ${(key_level * 0.01):.2f}+ below support",
-            "reason": "Major support break (1% below key level)",
+            "condition": f"Price rises ${(key_level * 0.01):.2f}+ ABOVE resistance",
+            "reason": "Major resistance break (1% above key level)",
             "action": "Setup completely dead. Look for new pattern.",
             "severity": "CRITICAL"
         })
