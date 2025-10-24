@@ -188,7 +188,8 @@ class BullishProTraderGold:
 
     def _identify_key_levels_h4(self, h4_data: pd.DataFrame, current_price: float) -> Dict[str, Any]:
         """
-        Identify key support/resistance levels using REAL 4H candles
+        BULLISH TRADER: Identify key SUPPORT levels using REAL 4H candles
+        Only looks for support BELOW price (potential BUY zones)
         Updates every 4 hours when 4H candle closes
         """
         if h4_data is None or h4_data.empty:
@@ -204,42 +205,26 @@ class BullishProTraderGold:
         highs = recent_data['high']
         lows = recent_data['low']
 
-        # Find significant resistance/support levels
-        resistance_candidates = []
+        # Find significant support levels ONLY (bullish trader looks for BUY opportunities)
         support_candidates = []
 
-        # Find local highs/lows using 4H candles
-        for i in range(5, len(highs) - 5):
-            # Resistance: local high
-            if highs.iloc[i] == highs.iloc[i-5:i+5].max():
-                resistance_candidates.append(float(highs.iloc[i]))
+        # Find local lows using 4H candles
+        for i in range(5, len(lows) - 5):
             # Support: local low
             if lows.iloc[i] == lows.iloc[i-5:i+5].min():
                 support_candidates.append(float(lows.iloc[i]))
 
-        # Get most relevant levels near current price
-        resistance = sorted([r for r in resistance_candidates if r > current_price])[:3] if resistance_candidates else []
+        # Get support levels BELOW current price (potential BUY zones)
         support = sorted([s for s in support_candidates if s < current_price], reverse=True)[:3] if support_candidates else []
 
-        # Identify THE key level (closest to price)
-        if resistance and support:
-            nearest_resistance = resistance[0]
-            nearest_support = support[0]
-            if abs(current_price - nearest_resistance) < abs(current_price - nearest_support):
-                key_level = nearest_resistance
-                level_type = "resistance"
-            else:
-                key_level = nearest_support
-                level_type = "support"
-        elif resistance:
-            key_level = resistance[0]
-            level_type = "resistance"
-        elif support:
-            key_level = support[0]
+        # BULLISH TRADER: Always prefer support (below price)
+        if support:
+            key_level = support[0]  # Closest support below price
             level_type = "support"
         else:
-            key_level = float(recent_data['close'].iloc[-1])
-            level_type = "pivot"
+            # If no support below, use recent low as potential support
+            key_level = float(recent_data['low'].tail(20).min())
+            level_type = "support"
 
         # Calculate distance to key level
         distance_pips = abs(current_price - key_level)
@@ -258,8 +243,8 @@ class BullishProTraderGold:
         return {
             "key_level": key_level,
             "level_type": level_type,
-            "resistance_levels": resistance,
-            "support_levels": support,
+            "resistance_levels": [],  # Bullish trader doesn't track resistance
+            "support_levels": support if support else [key_level],
             "distance_pips": round(distance_pips, 1),
             "last_updated": last_updated_str,
             "next_update": next_update
