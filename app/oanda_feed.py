@@ -61,9 +61,14 @@ async def get_current_xauusd_price() -> Optional[float]:
         print(f"❌ OANDA API error: {e}")
         return None
 
-async def get_xauusd_candles(count: int = 1000) -> Optional[pd.DataFrame]:
+async def get_xauusd_candles(count: int = 1000, granularity: str = "H1") -> Optional[pd.DataFrame]:
     """
-    Get historical XAUUSD hourly candles from OANDA
+    Get historical XAUUSD candles from OANDA with specified granularity
+
+    Args:
+        count: Number of candles to fetch (max 5000)
+        granularity: OANDA timeframe - "D" (daily), "H4" (4-hour), "H1" (1-hour), "M15" (15-min)
+
     Returns DataFrame with columns: time, open, high, low, close, volume
     """
     url = f"{OANDA_BASE_URL}/instruments/XAU_USD/candles"
@@ -72,7 +77,7 @@ async def get_xauusd_candles(count: int = 1000) -> Optional[pd.DataFrame]:
         "Accept-Datetime-Format": "UNIX"
     }
     params = {
-        "granularity": "H1",  # 1-hour candles
+        "granularity": granularity,  # Dynamic timeframe
         "count": count,
         "price": "M",  # Mid prices (matches our mid price calculation)
         "includeIncompleteCandles": "false"  # Exclude current open candle

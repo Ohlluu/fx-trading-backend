@@ -245,7 +245,15 @@ async def fetch_h1(symbol: str, timeframe: str = "H1") -> pd.DataFrame:
     # All FX/metals pairs use OANDA exclusively
     if s == "XAUUSD":
         from .oanda_feed import get_xauusd_candles
-        return await get_xauusd_candles(count=1000)
+        # Map our timeframe format to OANDA granularity
+        granularity_map = {
+            "D1": "D",      # Daily
+            "H4": "H4",     # 4-hour
+            "H1": "H1",     # 1-hour
+            "M15": "M15"    # 15-minute
+        }
+        oanda_granularity = granularity_map.get(timeframe, "H1")
+        return await get_xauusd_candles(count=1000, granularity=oanda_granularity)
 
     if s == "GBPUSD":
         from .oanda_feed import get_gbpusd_candles
