@@ -653,10 +653,16 @@ class BullishProTraderGold:
         has_active_touch = False
 
         if self.active_ob_touch is not None:
-            # Check if the active touch is still valid and matches this OB zone
+            # Check if the active touch is still valid and matches THIS EXACT OB zone
+            # Must match within 0.5 pips to prevent different OBs from sharing touch state
             if (now_utc < self.active_ob_touch["entry_valid_until"] and
-                abs(self.active_ob_touch["ob_zone"]["midpoint"] - nearest_ob["midpoint"]) < 1):
+                abs(self.active_ob_touch["ob_zone"]["top"] - nearest_ob["top"]) < 0.5 and
+                abs(self.active_ob_touch["ob_zone"]["bottom"] - nearest_ob["bottom"]) < 0.5):
                 has_active_touch = True
+            else:
+                # Different OB detected - clear the old touch
+                self.active_ob_touch = None
+                has_active_touch = False
 
         # Check 5-minute data for precise touches (only if not already inside the zone)
         m5_touched = False
