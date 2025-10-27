@@ -252,7 +252,7 @@ class BearishProTraderGold:
             "next_update": next_update
         }
 
-    def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
+    async def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
         """
         Detect which professional setup pattern is forming
         Returns detailed pattern information
@@ -260,13 +260,17 @@ class BearishProTraderGold:
         key_level = h4_levels["key_level"]
         last_candles = h1_data.tail(20)  # Increased for FVG detection
 
+        # Get current candle info to check if high touched key zones
+        current_candle_info = await self._get_current_candle_info(h1_data, current_price)
+        current_candle_high = current_candle_info.get("high")
+
         # Check for FAIR VALUE GAP (FVG) - HIGHEST PRIORITY
         fvg_setup = self._check_fvg(last_candles, current_price)
         if fvg_setup["detected"]:
             return fvg_setup
 
         # Check for ORDER BLOCK - SECOND PRIORITY
-        ob_setup = self._check_order_block(last_candles, current_price)
+        ob_setup = self._check_order_block(last_candles, current_price, current_candle_high)
         if ob_setup["detected"]:
             return ob_setup
 
@@ -481,13 +485,18 @@ class BearishProTraderGold:
             "distance_pips": float(distance_to_fvg)
         }
 
-    def _check_order_block(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+    def _check_order_block(self, candles: pd.DataFrame, current_price: float, current_candle_high: float = None) -> Dict[str, Any]:
         """
         Check for BEARISH Order Block pattern:
 
         Order Block = Last BEARISH candle before a strong DOWNWARD move
         This is where institutions (smart money) placed their SELL orders.
         When price returns UP to this level, those orders get filled = rejection DOWN.
+
+        Args:
+            candles: Historical H1 candles
+            current_price: Current market price
+            current_candle_high: High of the forming candle (from M5 data)
         """
         if len(candles) < 10:
             return {"detected": False}
@@ -568,8 +577,28 @@ class BearishProTraderGold:
                 abs(self.active_ob_touch["ob_zone"]["midpoint"] - nearest_ob["midpoint"]) < 1):
                 has_active_touch = True
 
+        # Check if current candle's high touched the OB zone
+        candle_touched_ob = False
+        if current_candle_high is not None:
+            # Check if the high of current candle went into or above the OB zone
+            if current_candle_high >= nearest_ob["bottom"]:
+                candle_touched_ob = True
+
         # Determine state based on proximity
         if current_price >= nearest_ob["bottom"] and current_price <= nearest_ob["top"]:
+            state = "IN_ORDER_BLOCK"
+            progress = "3/5"
+            confirmations = 2
+
+            # Save this touch - entry valid for 2 hours
+            self.active_ob_touch = {
+                "ob_zone": nearest_ob,
+                "touched_at": now_utc,
+                "entry_valid_until": now_utc + timedelta(hours=2)
+            }
+
+        elif candle_touched_ob:
+            # Current candle's high touched the OB zone (even if price pulled back down)
             state = "IN_ORDER_BLOCK"
             progress = "3/5"
             confirmations = 2

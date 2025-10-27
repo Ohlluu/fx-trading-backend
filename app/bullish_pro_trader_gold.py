@@ -260,6 +260,10 @@ class BullishProTraderGold:
         key_level = h4_levels["key_level"]
         last_candles = h1_data.tail(20)  # Need more candles for FVG detection
 
+        # Get current candle info to check if low touched key zones
+        current_candle_info = await self._get_current_candle_info(h1_data, current_price)
+        current_candle_low = current_candle_info.get("low")
+
         # Check for FAIR VALUE GAP (FVG) - HIGHEST PRIORITY
         # FVG = imbalance/gap in price action that price returns to fill
         fvg_setup = self._check_fvg(last_candles, current_price)
@@ -268,7 +272,7 @@ class BullishProTraderGold:
 
         # Check for ORDER BLOCK - SECOND PRIORITY
         # Order Block = last bullish candle before strong move (institutional orders)
-        ob_setup = await self._check_order_block(last_candles, current_price)
+        ob_setup = await self._check_order_block(last_candles, current_price, current_candle_low)
         if ob_setup["detected"]:
             return ob_setup
 
@@ -552,7 +556,7 @@ class BullishProTraderGold:
             print(f"Error checking M5 data: {e}")
             return False
 
-    async def _check_order_block(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+    async def _check_order_block(self, candles: pd.DataFrame, current_price: float, current_candle_low: float = None) -> Dict[str, Any]:
         """
         Check for BULLISH Order Block pattern:
 
@@ -565,6 +569,11 @@ class BullishProTraderGold:
         2. Identify the LAST bullish candle BEFORE that move
         3. That candle's body (open to close) is the Order Block zone
         4. When price returns to that zone, expect bounce UP
+
+        Args:
+            candles: Historical H1 candles
+            current_price: Current market price
+            current_candle_low: Low of the forming candle (from M5 data)
         """
         if len(candles) < 10:
             return {"detected": False}
@@ -655,9 +664,29 @@ class BullishProTraderGold:
             # Price is above the zone on H1 data, but check M5 for precise touches
             m5_touched = await self._check_ob_zone_touched_m5(nearest_ob["top"], nearest_ob["bottom"], lookback_hours=3)
 
+        # Check if current candle's low touched the OB zone
+        candle_touched_ob = False
+        if current_candle_low is not None:
+            # Check if the low of current candle went into or below the OB zone
+            if current_candle_low <= nearest_ob["top"]:
+                candle_touched_ob = True
+
         # Determine state based on proximity and M5 data
         if current_price <= nearest_ob["top"] and current_price >= nearest_ob["bottom"]:
             # Price is INSIDE the order block (filling orders now!)
+            state = "IN_ORDER_BLOCK"
+            progress = "3/5"
+            confirmations = 2
+
+            # Save this touch - entry valid for 2 hours
+            self.active_ob_touch = {
+                "ob_zone": nearest_ob,
+                "touched_at": now_utc,
+                "entry_valid_until": now_utc + timedelta(hours=2)
+            }
+
+        elif candle_touched_ob:
+            # Current candle's low touched the OB zone (even if price bounced back up)
             state = "IN_ORDER_BLOCK"
             progress = "3/5"
             confirmations = 2
