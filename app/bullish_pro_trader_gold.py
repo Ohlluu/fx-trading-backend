@@ -683,10 +683,19 @@ class BullishProTraderGold:
             }
 
         elif has_active_touch:
-            # OB was touched recently and entry is still valid
-            state = "IN_ORDER_BLOCK"
-            progress = "3/5"
-            confirmations = 2
+            # OB was touched recently - check if price is still reasonably close
+            if distance_to_ob <= 30:
+                # Price is still close enough (within 30 pips) - entry valid
+                state = "IN_ORDER_BLOCK"
+                progress = "3/5"
+                confirmations = 2
+            else:
+                # Price moved too far away (>30 pips) - entry no longer valid
+                # Clear the active touch and show as detected only
+                self.active_ob_touch = None
+                state = "DETECTED"
+                progress = "1/5"
+                confirmations = 0
 
         elif distance_to_ob <= 10:
             # Price is very close (within 10 pips)
