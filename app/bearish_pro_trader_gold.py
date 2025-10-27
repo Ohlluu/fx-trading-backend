@@ -55,7 +55,7 @@ class BearishProTraderGold:
             h1_setup = self._detect_setup_pattern(h1_data, h4_levels, current_price)
 
             # Get current candle details
-            current_candle = self._get_current_candle_info(h1_data, current_price)
+            current_candle = await self._get_current_candle_info(h1_data, current_price)
 
             # Build complete response
             return {
@@ -678,9 +678,10 @@ class BearishProTraderGold:
 
         return {"detected": False}
 
-    def _get_current_candle_info(self, h1_data: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+    async def _get_current_candle_info(self, h1_data: pd.DataFrame, current_price: float) -> Dict[str, Any]:
         """
         Get details about the currently forming 1H candle
+        Uses M5 candles to get accurate high/low instead of just estimating
         """
         last_closed_candle = h1_data.iloc[-1]
 
@@ -695,10 +696,44 @@ class BearishProTraderGold:
         current_hour_start_ct = current_hour_start_utc.astimezone(chicago_tz)
         next_hour_start_ct = next_hour_start_utc.astimezone(chicago_tz)
 
-        # Current candle estimation
+        # Current candle open
         current_candle_open = float(last_closed_candle['close'])
-        current_high = max(current_price, current_candle_open)
-        current_low = min(current_price, current_candle_open)
+
+        # Get REAL high/low from M5 candles of current hour
+        try:
+            from .datafeed import fetch_h1
+            m5_data = await fetch_h1("XAUUSD", timeframe="M5")
+
+            if m5_data is not None and not m5_data.empty:
+                # Ensure the index is datetime
+                if not isinstance(m5_data.index, pd.DatetimeIndex):
+                    m5_data.index = pd.to_datetime(m5_data.index)
+
+                # Filter M5 candles to only include those from current hour (>= current_hour_start_utc)
+                m5_data_utc = m5_data.tz_localize('UTC') if m5_data.index.tz is None else m5_data.tz_convert('UTC')
+                current_hour_m5 = m5_data_utc[m5_data_utc.index >= current_hour_start_utc]
+
+                if len(current_hour_m5) > 0:
+                    # Get actual high and low from M5 data of CURRENT hour only
+                    actual_high = float(current_hour_m5['high'].max())
+                    actual_low = float(current_hour_m5['low'].min())
+
+                    # Include current price in case it's higher/lower than M5 data
+                    current_high = max(actual_high, current_price)
+                    current_low = min(actual_low, current_price)
+                else:
+                    # No M5 data for current hour yet, use estimation
+                    current_high = max(current_price, current_candle_open)
+                    current_low = min(current_price, current_candle_open)
+            else:
+                # Fallback to estimation if M5 data unavailable
+                current_high = max(current_price, current_candle_open)
+                current_low = min(current_price, current_candle_open)
+        except Exception as e:
+            print(f"Error fetching M5 for current candle: {e}")
+            # Fallback to estimation
+            current_high = max(current_price, current_candle_open)
+            current_low = min(current_price, current_candle_open)
 
         return {
             "timeframe": "1H",

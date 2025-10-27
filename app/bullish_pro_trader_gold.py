@@ -748,16 +748,26 @@ class BullishProTraderGold:
             m5_data = await fetch_h1("XAUUSD", timeframe="M5")
 
             if m5_data is not None and not m5_data.empty:
-                # Get M5 candles from current hour only (last 12 candles = 1 hour)
-                current_hour_m5 = m5_data.tail(12)
+                # Ensure the index is datetime
+                if not isinstance(m5_data.index, pd.DatetimeIndex):
+                    m5_data.index = pd.to_datetime(m5_data.index)
 
-                # Get actual high and low from M5 data
-                actual_high = float(current_hour_m5['high'].max())
-                actual_low = float(current_hour_m5['low'].min())
+                # Filter M5 candles to only include those from current hour (>= current_hour_start_utc)
+                m5_data_utc = m5_data.tz_localize('UTC') if m5_data.index.tz is None else m5_data.tz_convert('UTC')
+                current_hour_m5 = m5_data_utc[m5_data_utc.index >= current_hour_start_utc]
 
-                # Include current price in case it's higher/lower than M5 data
-                current_high = max(actual_high, current_price)
-                current_low = min(actual_low, current_price)
+                if len(current_hour_m5) > 0:
+                    # Get actual high and low from M5 data of CURRENT hour only
+                    actual_high = float(current_hour_m5['high'].max())
+                    actual_low = float(current_hour_m5['low'].min())
+
+                    # Include current price in case it's higher/lower than M5 data
+                    current_high = max(actual_high, current_price)
+                    current_low = min(actual_low, current_price)
+                else:
+                    # No M5 data for current hour yet, use estimation
+                    current_high = max(current_price, current_candle_open)
+                    current_low = min(current_price, current_candle_open)
             else:
                 # Fallback to estimation if M5 data unavailable
                 current_high = max(current_price, current_candle_open)
