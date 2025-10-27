@@ -52,7 +52,7 @@ class BearishProTraderGold:
             # Analyze market structure across timeframes (using REAL data)
             daily_analysis = self._analyze_daily_trend(d1_data, current_price)
             h4_levels = self._identify_key_levels_h4(h4_data, current_price)
-            h1_setup = self._detect_setup_pattern(h1_data, h4_levels, current_price)
+            h1_setup = await self._detect_setup_pattern(h1_data, h4_levels, current_price)
 
             # Get current candle details
             current_candle = await self._get_current_candle_info(h1_data, current_price)
