@@ -334,18 +334,22 @@ class BullishProTraderGold:
                 if candle['close'] < key_level - 5:  # 5 pips buffer
                     return {"detected": False}  # Setup invalidated
 
-        # Check if price has come back to test the level
+        # Check if price has come back DOWN to test the level
         retest_happening = False
         rejection_confirmed = False
 
         if len(candles_after_breakout) > 0:
-            # Retest = price returned close to key level
+            # Retest = price returned DOWN close to key level (from above)
+            # MUST actually reach within 3 pips of the level to count as a retest
             for i, candle in candles_after_breakout.iterrows():
-                if abs(candle['low'] - key_level) < 10:  # Within 10 pips
+                distance_to_level = candle['low'] - key_level  # Positive if price above level
+
+                # Only count as retest if LOW actually reached within 3 pips of support
+                if distance_to_level <= 3 and distance_to_level >= -2:  # Within 3 pips above or 2 pips below
                     retest_happening = True
 
-                    # Check for rejection (long lower wick + close above)
-                    wick_size = candle['low'] - min(candle['open'], candle['close'])
+                    # Check for BULLISH rejection (long LOWER wick + close ABOVE)
+                    wick_size = min(candle['open'], candle['close']) - candle['low']
                     if wick_size > 3 and candle['close'] > key_level + 5:
                         rejection_confirmed = True
 
