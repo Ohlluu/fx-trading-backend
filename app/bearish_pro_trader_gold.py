@@ -67,7 +67,7 @@ class BearishProTraderGold:
                 "pattern_type": h1_setup["pattern_type"],
 
                 # Step-by-step breakdown
-                "setup_steps": self._build_setup_steps(h1_setup, current_price, current_candle),
+                "setup_steps": self._build_setup_steps(h1_setup, current_price, current_candle, h1_data),
 
                 # Context explanation
                 "why_this_setup": {
@@ -751,7 +751,7 @@ class BearishProTraderGold:
             "candle_close_expected": next_hour_start_ct.strftime("%I:%M %p CT")
         }
 
-    def _build_setup_steps(self, setup: Dict, current_price: float, current_candle: Dict) -> List[Dict[str, Any]]:
+    def _build_setup_steps(self, setup: Dict, current_price: float, current_candle: Dict, h1_data: pd.DataFrame = None) -> List[Dict[str, Any]]:
         """
         Build step-by-step breakdown based on pattern type (BEARISH)
         """
@@ -760,7 +760,7 @@ class BearishProTraderGold:
         if pattern == "FAIR_VALUE_GAP":
             return self._fvg_steps(setup, current_price)
         elif pattern == "ORDER_BLOCK":
-            return self._order_block_steps(setup, current_price)
+            return self._order_block_steps(setup, current_price, h1_data)
         elif pattern == "BREAKDOWN_RETEST":
             return self._breakdown_retest_steps(setup, current_price, current_candle)
         elif pattern == "SUPPLY_ZONE":
@@ -1309,7 +1309,57 @@ class BearishProTraderGold:
 
         return steps
 
-    def _order_block_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
+    def _calculate_ob_sl_tp(self, ob_zone: Dict, current_price: float, h1_data: pd.DataFrame = None) -> Dict[str, float]:
+        """
+        Calculate Stop Loss and Take Profit for Order Block trade (BEARISH/SHORT)
+
+        SL: 5 pips above OB top (OB invalidation level)
+        TP: Next support level or 1:2 R:R minimum
+        """
+        ob_bottom = ob_zone.get('bottom', 0)
+        ob_top = ob_zone.get('top', 0)
+        ob_midpoint = ob_zone.get('midpoint', 0)
+
+        # Stop Loss: 5 pips above OB top
+        stop_loss = ob_top + 5
+
+        # Find next support level from H1 data
+        take_profit = None
+        if h1_data is not None and not h1_data.empty:
+            # Look for swing lows below current price in recent data
+            recent_candles = h1_data.tail(50)  # Last 50 hours
+
+            # Find lows below current price
+            support_levels = []
+            for i in range(1, len(recent_candles) - 1):
+                low = recent_candles.iloc[i]['low']
+                prev_low = recent_candles.iloc[i-1]['low']
+                next_low = recent_candles.iloc[i+1]['low']
+
+                # Swing low: lower than neighbors and below current price
+                if low < prev_low and low < next_low and low < current_price:
+                    support_levels.append(low)
+
+            if support_levels:
+                # Take the nearest support below current price
+                take_profit = max(support_levels)
+
+        # If no support found or too close, use 1:2 R:R minimum
+        risk = stop_loss - ob_midpoint
+        min_tp_1_2 = ob_midpoint - (risk * 2)  # 1:2 R:R from midpoint entry
+
+        if take_profit is None or take_profit > min_tp_1_2:
+            take_profit = min_tp_1_2
+
+        return {
+            "stop_loss": float(stop_loss),
+            "take_profit": float(take_profit),
+            "risk_pips": float(stop_loss - ob_midpoint),
+            "reward_pips": float(ob_midpoint - take_profit),
+            "risk_reward_ratio": float((ob_midpoint - take_profit) / (stop_loss - ob_midpoint)) if (stop_loss - ob_midpoint) > 0 else 0
+        }
+
+    def _order_block_steps(self, setup: Dict, current_price: float, h1_data: pd.DataFrame = None) -> List[Dict[str, Any]]:
         """
         Create detailed steps for ORDER BLOCK pattern - BEARISH
         Order Block = Last bearish candle before strong move = Institutional sell orders
@@ -1358,6 +1408,9 @@ class BearishProTraderGold:
 
         # Step 3: Entry Strategy (only when IN_ORDER_BLOCK)
         if state == "IN_ORDER_BLOCK":
+            # Calculate SL/TP
+            sl_tp = self._calculate_ob_sl_tp(ob_zone, current_price, h1_data)
+
             steps.append({
                 "step": 3,
                 "status": "ready",
@@ -1365,15 +1418,31 @@ class BearishProTraderGold:
                 "entry_options": [
                     {
                         "type": "Option A: Enter at OB midpoint (Aggressive)",
-                        "trigger": f"Enter NOW at ${ob_zone.get('midpoint', 0):.2f}",
+                        "entry": f"${ob_zone.get('midpoint', 0):.2f}",
+                        "stop_loss": f"${sl_tp['stop_loss']:.2f}",
+                        "take_profit": f"${sl_tp['take_profit']:.2f}",
+                        "risk_pips": f"{sl_tp['risk_pips']:.1f} pips",
+                        "reward_pips": f"{sl_tp['reward_pips']:.1f} pips",
+                        "risk_reward": f"1:{sl_tp['risk_reward_ratio']:.1f}",
+                        "trigger": f"SELL NOW at ${ob_zone.get('midpoint', 0):.2f}",
                         "pros": "Best entry price, highest R:R",
-                        "cons": "No confirmation candle"
+                        "cons": "No confirmation candle",
+                        "why_sl": f"SL at ${sl_tp['stop_loss']:.2f} - If price closes above OB zone, setup is invalidated",
+                        "why_tp": f"TP at ${sl_tp['take_profit']:.2f} - Next support level or 1:2 R:R minimum"
                     },
                     {
                         "type": "Option B: Wait for bearish confirmation (Conservative)",
-                        "trigger": "Wait for 1H bearish candle inside OB zone",
+                        "entry": f"Wait for close (est. ${ob_zone.get('bottom', 0):.2f})",
+                        "stop_loss": f"${sl_tp['stop_loss']:.2f}",
+                        "take_profit": f"${sl_tp['take_profit']:.2f}",
+                        "risk_pips": f"{sl_tp['risk_pips'] + 5:.1f} pips (slightly more)",
+                        "reward_pips": f"{sl_tp['reward_pips'] - 5:.1f} pips (slightly less)",
+                        "risk_reward": f"1:{(sl_tp['reward_pips'] - 5) / (sl_tp['risk_pips'] + 5):.1f}",
+                        "trigger": "Wait for 1H bearish candle to close inside OB zone",
                         "pros": "Confirmation of sellers stepping in",
-                        "cons": "Slightly worse entry price"
+                        "cons": "Slightly worse entry price",
+                        "why_sl": f"SL at ${sl_tp['stop_loss']:.2f} - If price closes above OB zone, setup is invalidated",
+                        "why_tp": f"TP at ${sl_tp['take_profit']:.2f} - Next support level or 1:2 R:R minimum"
                     }
                 ],
                 "recommendation": "Option A for aggressive (OB midpoint entry), Option B for conservative (wait for confirmation)",
