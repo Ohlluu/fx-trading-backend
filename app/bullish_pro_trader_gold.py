@@ -277,7 +277,7 @@ class BullishProTraderGold:
             return ob_setup
 
         # Check for BREAKOUT RETEST pattern
-        breakout_setup = self._check_breakout_retest(last_candles, key_level, current_price)
+        breakout_setup = self._check_breakout_retest(last_candles, key_level, current_price, current_candle_low)
         if breakout_setup["detected"]:
             return breakout_setup
 
@@ -297,13 +297,19 @@ class BullishProTraderGold:
             "description": "Scanning for professional setups..."
         }
 
-    def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float) -> Dict[str, Any]:
+    def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float, current_candle_low: float = None) -> Dict[str, Any]:
         """
         Check for Breakout Retest pattern:
         1. Price was below resistance
         2. Price broke above resistance (breakout)
         3. Price pulled back to test old resistance (now support)
         4. Looking for rejection + confirmation
+
+        Args:
+            candles: Historical H1 candles
+            key_level: The support/resistance level
+            current_price: Current market price
+            current_candle_low: Low of the forming candle (from M5 data)
         """
         if len(candles) < 5:
             return {"detected": False}
@@ -338,6 +344,15 @@ class BullishProTraderGold:
         retest_happening = False
         rejection_confirmed = False
 
+        # First check M5 precision: did current candle's low touch the level?
+        candle_touched_level = False
+        if current_candle_low is not None:
+            distance_to_level = current_candle_low - key_level  # Positive if price above level
+            if distance_to_level <= 3 and distance_to_level >= -2:  # Within 3 pips
+                candle_touched_level = True
+                retest_happening = True
+
+        # Also check closed H1 candles after breakout
         if len(candles_after_breakout) > 0:
             # Retest = price returned DOWN close to key level (from above)
             # MUST actually reach within 3 pips of the level to count as a retest

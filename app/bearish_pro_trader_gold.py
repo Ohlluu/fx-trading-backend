@@ -275,7 +275,7 @@ class BearishProTraderGold:
             return ob_setup
 
         # Check for BREAKDOWN RETEST pattern
-        breakdown_setup = self._check_breakout_retest(last_candles, key_level, current_price)
+        breakdown_setup = self._check_breakout_retest(last_candles, key_level, current_price, current_candle_high)
         if breakdown_setup["detected"]:
             return breakdown_setup
 
@@ -295,13 +295,19 @@ class BearishProTraderGold:
             "description": "Scanning for professional setups..."
         }
 
-    def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float) -> Dict[str, Any]:
+    def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float, current_candle_high: float = None) -> Dict[str, Any]:
         """
         Check for BREAKDOWN Retest pattern (BEARISH):
         1. Price was above support
         2. Price broke BELOW support (breakdown)
         3. Price pulled back UP to test old support (now resistance)
         4. Looking for bearish rejection + confirmation
+
+        Args:
+            candles: Historical H1 candles
+            key_level: The support/resistance level
+            current_price: Current market price
+            current_candle_high: High of the forming candle (from M5 data)
         """
         if len(candles) < 5:
             return {"detected": False}
@@ -336,6 +342,15 @@ class BearishProTraderGold:
         retest_happening = False
         rejection_confirmed = False
 
+        # First check M5 precision: did current candle's high touch the level?
+        candle_touched_level = False
+        if current_candle_high is not None:
+            distance_to_level = key_level - current_candle_high  # Positive if price below level
+            if distance_to_level <= 3 and distance_to_level >= -2:  # Within 3 pips
+                candle_touched_level = True
+                retest_happening = True
+
+        # Also check closed H1 candles after breakdown
         if len(candles_after_breakdown) > 0:
             # Retest = price returned UP close to key level (from below)
             # MUST actually reach within 3 pips of the level to count as a retest
