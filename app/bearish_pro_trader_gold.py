@@ -28,6 +28,8 @@ class BearishProTraderGold:
             "H4": 500,  # ~83 days of 4H candles (approx 83 days * 6 candles/day)
             "H1": 100   # 100 hours
         }
+        # Track active OB touches to persist entry signals
+        self.active_ob_touch = None  # Will store: {"ob_zone": {...}, "touched_at": timestamp, "entry_valid_until": timestamp}
 
     async def get_detailed_setup(self) -> Dict[str, Any]:
         """
@@ -556,22 +558,46 @@ class BearishProTraderGold:
         # Check if price is approaching the OB (within 20 pips)
         distance_to_ob = nearest_ob["midpoint"] - current_price
 
-        if distance_to_ob > 20:
-            return {"detected": False}  # Too far away
+        # Check for active OB touch from previous detection
+        now_utc = datetime.now(pytz.UTC)
+        has_active_touch = False
+
+        if self.active_ob_touch is not None:
+            # Check if the active touch is still valid and matches this OB zone
+            if (now_utc < self.active_ob_touch["entry_valid_until"] and
+                abs(self.active_ob_touch["ob_zone"]["midpoint"] - nearest_ob["midpoint"]) < 1):
+                has_active_touch = True
 
         # Determine state based on proximity
         if current_price >= nearest_ob["bottom"] and current_price <= nearest_ob["top"]:
-            state = "IN_OB"
+            state = "IN_ORDER_BLOCK"
             progress = "3/5"
             confirmations = 2
+
+            # Save this touch - entry valid for 2 hours
+            self.active_ob_touch = {
+                "ob_zone": nearest_ob,
+                "touched_at": now_utc,
+                "entry_valid_until": now_utc + timedelta(hours=2)
+            }
+
+        elif has_active_touch:
+            # OB was touched recently and entry is still valid
+            state = "IN_ORDER_BLOCK"
+            progress = "3/5"
+            confirmations = 2
+
         elif distance_to_ob <= 10:
             state = "APPROACHING"
             progress = "2/5"
             confirmations = 1
-        else:
+        elif distance_to_ob <= 20:
             state = "DETECTED"
             progress = "1/5"
             confirmations = 0
+        else:
+            # Too far away, no active setup
+            return {"detected": False}
 
         return {
             "detected": True,
@@ -582,7 +608,7 @@ class BearishProTraderGold:
             "key_level": nearest_ob["midpoint"],
             "confirmations": confirmations,
             "expected_entry": nearest_ob["midpoint"],
-            "order_block": {
+            "order_block_zone": {
                 "top": nearest_ob["top"],
                 "bottom": nearest_ob["bottom"],
                 "midpoint": nearest_ob["midpoint"],
@@ -1258,7 +1284,7 @@ class BearishProTraderGold:
         # Step 1: Order Block Detected
         steps.append({
             "step": 1,
-            "status": "complete" if state in ["APPROACHING", "IN_OB"] else "in_progress",
+            "status": "complete" if state in ["APPROACHING", "IN_ORDER_BLOCK"] else "in_progress",
             "title": "📦 Order Block Detected",
             "details": f"OB Zone: ${ob_zone.get('bottom', 0):.2f} - ${ob_zone.get('top', 0):.2f} ({ob_zone.get('size_pips', 0):.1f} pips)",
             "explanation": f"Institutional SELL orders placed {ob_zone.get('age_candles', 0)} candles ago. Currently {distance:.1f} pips away."
@@ -1273,13 +1299,13 @@ class BearishProTraderGold:
                 "details": f"Distance to OB: {distance:.1f} pips (within 10 pips)",
                 "explanation": "Price is rising toward the institutional order zone. Watch for bearish rejection reaction."
             })
-        elif state == "IN_OB":
+        elif state == "IN_ORDER_BLOCK":
             steps.append({
                 "step": 2,
                 "status": "complete",
-                "title": "✅ Price Inside Order Block",
-                "details": f"Current: ${current_price:.2f} (inside OB zone)",
-                "explanation": "Price has reached the institutional order zone. High probability of bearish rejection."
+                "title": "✅ Price Touched Order Block",
+                "details": f"OB zone was touched (price dropped {distance:.1f} pips from zone)",
+                "explanation": "Price reached the institutional order zone and rejected. Entry signal is active."
             })
         else:
             steps.append({
@@ -1290,8 +1316,8 @@ class BearishProTraderGold:
                 "explanation": "Monitoring price action as it moves toward order block."
             })
 
-        # Step 3: Entry Strategy (only when IN_OB)
-        if state == "IN_OB":
+        # Step 3: Entry Strategy (only when IN_ORDER_BLOCK)
+        if state == "IN_ORDER_BLOCK":
             steps.append({
                 "step": 3,
                 "status": "ready",
