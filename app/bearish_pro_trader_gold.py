@@ -1250,7 +1250,7 @@ class BearishProTraderGold:
         When price returns UP to this level, those orders get filled = rejection DOWN
         """
         state = setup.get("state", "DETECTED")
-        ob_zone = setup.get("order_block", {})
+        ob_zone = setup.get("order_block_zone", {})
         distance = setup.get("distance_pips", 0)
 
         steps = []
@@ -1660,7 +1660,7 @@ class BearishProTraderGold:
 
     def _order_block_invalidation(self, setup: Dict, state: str, key_level: float) -> List[Dict[str, Any]]:
         """Dynamic invalidation for ORDER BLOCK pattern - BEARISH"""
-        ob_zone = setup.get("order_block", {})
+        ob_zone = setup.get("order_block_zone", {})
         ob_top = ob_zone.get("top", key_level + 3)
 
         conditions = []

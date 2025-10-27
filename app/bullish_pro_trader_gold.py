@@ -50,7 +50,7 @@ class BullishProTraderGold:
             # Analyze market structure across timeframes (using REAL data)
             daily_analysis = self._analyze_daily_trend(d1_data, current_price)
             h4_levels = self._identify_key_levels_h4(h4_data, current_price)
-            h1_setup = self._detect_setup_pattern(h1_data, h4_levels, current_price)
+            h1_setup = await self._detect_setup_pattern(h1_data, h4_levels, current_price)
 
             # Get current candle details
             current_candle = self._get_current_candle_info(h1_data, current_price)
@@ -250,7 +250,7 @@ class BullishProTraderGold:
             "next_update": next_update
         }
 
-    def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
+    async def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
         """
         Detect which professional setup pattern is forming
         Returns detailed pattern information
@@ -266,7 +266,7 @@ class BullishProTraderGold:
 
         # Check for ORDER BLOCK - SECOND PRIORITY
         # Order Block = last bullish candle before strong move (institutional orders)
-        ob_setup = self._check_order_block(last_candles, current_price)
+        ob_setup = await self._check_order_block(last_candles, current_price)
         if ob_setup["detected"]:
             return ob_setup
 
@@ -512,7 +512,45 @@ class BullishProTraderGold:
             "distance_pips": float(distance_to_fvg)
         }
 
-    def _check_order_block(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+    async def _check_ob_zone_touched_m5(self, ob_top: float, ob_bottom: float, lookback_hours: int = 3) -> bool:
+        """
+        Check if Order Block zone was touched using 5-minute candles for precision
+        Looks back N hours to see if any 5-min candle low touched the OB zone
+
+        Args:
+            ob_top: Top of the OB zone
+            ob_bottom: Bottom of the OB zone
+            lookback_hours: How many hours to check (default 3)
+
+        Returns:
+            True if any 5-min candle touched the zone, False otherwise
+        """
+        try:
+            from .datafeed import fetch_h1
+
+            # Fetch 5-minute candles (12 candles per hour * lookback_hours)
+            count = 12 * lookback_hours
+            m5_data = await fetch_h1("XAUUSD", timeframe="M5")
+
+            if m5_data is None or m5_data.empty:
+                return False
+
+            # Check last N candles for touches
+            recent_m5 = m5_data.tail(count)
+
+            # Check if any 5-min candle low touched or entered the OB zone
+            for _, candle in recent_m5.iterrows():
+                if candle['low'] <= ob_top:
+                    # Price touched or entered the zone
+                    return True
+
+            return False
+
+        except Exception as e:
+            print(f"Error checking M5 data: {e}")
+            return False
+
+    async def _check_order_block(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
         """
         Check for BULLISH Order Block pattern:
 
@@ -602,9 +640,20 @@ class BullishProTraderGold:
         if distance_to_ob > 20:
             return {"detected": False}  # Too far away
 
-        # Determine state based on proximity
+        # Check 5-minute data for precise touches (only if not already inside the zone)
+        m5_touched = False
+        if current_price > nearest_ob["top"]:
+            # Price is above the zone on H1 data, but check M5 for precise touches
+            m5_touched = await self._check_ob_zone_touched_m5(nearest_ob["top"], nearest_ob["bottom"], lookback_hours=3)
+
+        # Determine state based on proximity and M5 data
         if current_price <= nearest_ob["top"] and current_price >= nearest_ob["bottom"]:
             # Price is INSIDE the order block (filling orders now!)
+            state = "IN_ORDER_BLOCK"
+            progress = "3/5"
+            confirmations = 2
+        elif m5_touched:
+            # M5 data shows zone was touched (upgrade state)
             state = "IN_ORDER_BLOCK"
             progress = "3/5"
             confirmations = 2
@@ -969,7 +1018,7 @@ class BullishProTraderGold:
         When price returns to this level, those orders get filled = bounce UP
         """
         state = setup.get("state", "DETECTED")
-        ob_zone = setup.get("order_block", {})
+        ob_zone = setup.get("order_block_zone", {})
         distance = setup.get("distance_pips", 0)
 
         steps = []

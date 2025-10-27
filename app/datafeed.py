@@ -250,7 +250,8 @@ async def fetch_h1(symbol: str, timeframe: str = "H1") -> pd.DataFrame:
             "D1": "D",      # Daily
             "H4": "H4",     # 4-hour
             "H1": "H1",     # 1-hour
-            "M15": "M15"    # 15-minute
+            "M15": "M15",   # 15-minute
+            "M5": "M5"      # 5-minute
         }
         oanda_granularity = granularity_map.get(timeframe, "H1")
         return await get_xauusd_candles(count=1000, granularity=oanda_granularity)
