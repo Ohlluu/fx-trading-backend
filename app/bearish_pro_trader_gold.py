@@ -338,8 +338,12 @@ class BearishProTraderGold:
 
         if len(candles_after_breakdown) > 0:
             # Retest = price returned UP close to key level (from below)
+            # MUST actually reach within 3 pips of the level to count as a retest
             for i, candle in candles_after_breakdown.iterrows():
-                if abs(candle['high'] - key_level) < 10:  # Within 10 pips (checking HIGH now, not low)
+                distance_to_level = key_level - candle['high']  # Positive if price below level
+
+                # Only count as retest if HIGH actually reached within 3 pips of resistance
+                if distance_to_level <= 3 and distance_to_level >= -2:  # Within 3 pips below or 2 pips above
                     retest_happening = True
 
                     # Check for BEARISH rejection (long UPPER wick + close BELOW)
