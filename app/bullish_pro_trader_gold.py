@@ -742,18 +742,14 @@ class BullishProTraderGold:
         # Current candle open
         current_candle_open = float(last_closed_candle['close'])
 
-        # Get REAL high/low from M5 candles of current hour
+        # Get REAL high/low from M5 candles of current hour (including forming candles)
         try:
-            from .datafeed import fetch_h1
-            m5_data = await fetch_h1("XAUUSD", timeframe="M5")
+            from .oanda_feed import get_forming_candles
+            m5_data = await get_forming_candles(granularity="M5", count=20)
 
             if m5_data is not None and not m5_data.empty:
-                # Ensure the index is datetime
-                if not isinstance(m5_data.index, pd.DatetimeIndex):
-                    m5_data.index = pd.to_datetime(m5_data.index)
-
                 # Filter M5 candles to only include those from current hour (>= current_hour_start_utc)
-                m5_data_utc = m5_data.tz_localize('UTC') if m5_data.index.tz is None else m5_data.tz_convert('UTC')
+                m5_data_utc = m5_data.tz_convert('UTC') if m5_data.index.tz is not None else m5_data.tz_localize('UTC')
                 current_hour_m5 = m5_data_utc[m5_data_utc.index >= current_hour_start_utc]
 
                 if len(current_hour_m5) > 0:

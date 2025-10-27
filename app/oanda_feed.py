@@ -139,6 +139,72 @@ async def get_xauusd_candles(count: int = 1000, granularity: str = "H1") -> Opti
         print(f"❌ OANDA candles API error: {e}")
         return None
 
+async def get_forming_candles(granularity: str = "M5", count: int = 20) -> Optional[pd.DataFrame]:
+    """
+    Get recent candles INCLUDING the incomplete/forming candle
+    Used to track the current hour's high/low with M5 precision
+
+    Args:
+        granularity: OANDA timeframe - "M5", "M15", "H1", etc.
+        count: Number of candles to fetch
+
+    Returns DataFrame with forming candles included
+    """
+    url = f"{OANDA_BASE_URL}/instruments/XAU_USD/candles"
+    headers = {
+        "Authorization": f"Bearer {OANDA_API_KEY}",
+        "Accept-Datetime-Format": "UNIX"
+    }
+    params = {
+        "granularity": granularity,
+        "count": count,
+        "price": "M",
+        "includeIncompleteCandles": "true"  # INCLUDE forming candles
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url, headers=headers, params=params)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                if "candles" in data and data["candles"]:
+                    candles = []
+
+                    for candle in data["candles"]:
+                        # Include ALL candles (complete and incomplete)
+                        timestamp = datetime.fromtimestamp(
+                            float(candle["time"]),
+                            tz=pytz.UTC
+                        )
+
+                        mid = candle["mid"]
+                        candles.append([
+                            timestamp,
+                            float(mid["o"]),
+                            float(mid["h"]),
+                            float(mid["l"]),
+                            float(mid["c"]),
+                            int(candle.get("volume", 0)),
+                            candle["complete"]  # Track if candle is complete
+                        ])
+
+                    if candles:
+                        df = pd.DataFrame(candles, columns=[
+                            "time", "open", "high", "low", "close", "volume", "complete"
+                        ])
+                        df = df.sort_values("time")
+                        df = df.set_index("time", drop=False)
+                        return df
+
+            print(f"❌ OANDA forming candles error: {response.status_code}")
+            return None
+
+    except Exception as e:
+        print(f"❌ OANDA forming candles API error: {e}")
+        return None
+
 async def get_latest_candle_data() -> Optional[Dict[str, Any]]:
     """
     Get just the latest completed hourly candle
