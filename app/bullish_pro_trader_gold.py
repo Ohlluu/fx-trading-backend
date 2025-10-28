@@ -505,12 +505,29 @@ class BullishProTraderGold:
 
         # Add Order Block
         if ob_setup["detected"]:
-            confluences.append({
-                "type": "ORDER_BLOCK",
-                "score": 3,
-                "description": f"Order Block at ${ob_setup.get('ob_zone', {}).get('midpoint', 0):.2f}"
-            })
-            total_score += 3
+            # CRITICAL: Validate that OB zone is still holding
+            ob_zone = ob_setup.get('order_block_zone', {})
+            ob_bottom = ob_zone.get('bottom', 0)
+            ob_top = ob_zone.get('top', 0)
+
+            # Get current candle low to check if OB was violated
+            current_candle_low = last_candles['low'].iloc[-1] if len(last_candles) > 0 else current_price
+
+            # For BULLISH OB: Invalidate if price closed BELOW the OB bottom (not just touched)
+            # Allow wicks into the zone, but not full candle closes below it
+            ob_violated = current_price < ob_bottom or (current_candle_low < ob_bottom * 0.998)  # 0.2% buffer for wicks
+
+            if not ob_violated:
+                confluences.append({
+                    "type": "ORDER_BLOCK",
+                    "score": 3,
+                    "description": f"Order Block at ${ob_zone.get('midpoint', 0):.2f} (${ob_bottom:.2f}-${ob_top:.2f})"
+                })
+                total_score += 3
+            else:
+                # OB was violated - do NOT add to confluence
+                # This prevents false high-score setups when price breaks through OB
+                pass
 
         # Add Breakout Retest
         if breakout_setup["detected"]:
