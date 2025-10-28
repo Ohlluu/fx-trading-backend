@@ -400,7 +400,8 @@ class BullishProTraderGold:
                 "price": current_price
             } if retest_happening else None,
             "rejection_candle_low": float(candles.tail(1).iloc[0]['low']) if rejection_confirmed else None,
-            "expected_entry": current_price
+            "expected_entry": current_price,
+            "rejection_confirmed": rejection_confirmed  # Conservative confirmation flag
         }
 
     def _check_demand_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
@@ -1037,27 +1038,49 @@ class BullishProTraderGold:
 
         # Step 5: Entry
         if state == "READY_TO_ENTER":
+            # Calculate SL/TP
+            stop_loss = key_level - 5  # 5 pips below support
+            risk_pips = abs(current_price - stop_loss) / 0.1
+            take_profit = current_price + (risk_pips * 2 * 0.1)  # 1:2 R:R minimum
+            reward_pips = abs(take_profit - current_price) / 0.1
+
             steps.append({
                 "step": 5,
                 "status": "ready",
                 "title": "🎯 READY TO ENTER",
                 "entry_options": [
                     {
-                        "type": "Option A: Wait for 3rd bullish candle",
-                        "trigger": f"When next 1H candle closes above ${current_price:.2f}",
-                        "current_count": f"{setup['confirmations']}/3 complete",
-                        "pros": "Safest - most confirmation",
-                        "cons": "Might miss some entry price"
+                        "type": "Option A: Enter at retest level (Aggressive)",
+                        "entry": f"${key_level:.2f}",
+                        "stop_loss": f"${stop_loss:.2f}",
+                        "take_profit": f"${take_profit:.2f}",
+                        "risk_pips": f"{risk_pips:.1f} pips",
+                        "reward_pips": f"{reward_pips:.1f} pips",
+                        "risk_reward": f"1:{reward_pips/risk_pips:.1f}",
+                        "trigger": f"Enter NOW at ${current_price:.2f}",
+                        "pros": "Best entry price, catch full move",
+                        "cons": "No confirmation candle yet",
+                        "why_sl": f"SL at ${stop_loss:.2f} - If price closes below support, retest failed",
+                        "why_tp": f"TP at ${take_profit:.2f} - Next resistance level or 1:2 R:R minimum"
                     },
                     {
-                        "type": "Option B: Enter now (market order)",
-                        "trigger": f"Enter at current price: ${current_price:.2f}",
-                        "pros": "Catch current price level",
-                        "cons": "Less confirmation"
+                        "type": "Option B: Wait for rejection confirmation (Conservative)",
+                        "entry": f"Wait for rejection (est. ${current_price + 5:.2f})",
+                        "stop_loss": f"${stop_loss:.2f}",
+                        "take_profit": f"${take_profit:.2f}",
+                        "risk_pips": f"{risk_pips + 5:.1f} pips (slightly more)",
+                        "reward_pips": f"{reward_pips - 5:.1f} pips (slightly less)",
+                        "risk_reward": f"1:{(reward_pips - 5)/(risk_pips + 5):.1f}",
+                        "trigger": "Wait for: 1H bullish rejection candle (wick touches support + closes 5+ pips above)",
+                        "confirmed": setup.get("rejection_confirmed", False),
+                        "pros": "Confirmation of buyers defending support",
+                        "cons": "Slightly worse entry price",
+                        "why_sl": f"SL at ${stop_loss:.2f} - If price closes below support, retest failed",
+                        "why_tp": f"TP at ${take_profit:.2f} - Next resistance level or 1:2 R:R minimum"
                     }
                 ],
-                "recommendation": "Option A for conservative, Option B if momentum building",
-                "explanation": "Setup complete. Choose entry method based on your style."
+                "recommendation": "Option A for aggressive (retest entry), Option B for conservative (wait for rejection)",
+                "explanation": "Breakout Retest complete! Support should hold. High probability setup."
             })
 
         return steps
