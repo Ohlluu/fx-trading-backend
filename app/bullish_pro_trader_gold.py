@@ -31,6 +31,17 @@ class BullishProTraderGold:
         # Track active OB touches to persist entry signals
         self.active_ob_touch = None  # Will store: {"ob_zone": {...}, "touched_at": timestamp, "entry_valid_until": timestamp}
 
+        # STABILITY TRACKER: Patterns must be stable for 15 minutes before counting
+        self.pattern_tracker = {
+            "liquidity_grab": None,  # {"first_seen": timestamp, "data": {...}}
+            "fvg": None,
+            "order_block": None,
+            "breakout_retest": None,
+            "demand_zone": None,
+            "last_entry_state": None,  # Track last entry state to prevent flickering
+            "entry_state_since": None  # When current state started
+        }
+
     async def get_detailed_setup(self) -> Dict[str, Any]:
         """
         Main function: Returns complete setup analysis with educational breakdown
@@ -486,7 +497,8 @@ class BullishProTraderGold:
             })
 
         # Add liquidity grab (highest priority)
-        if liquidity_grab["detected"]:
+        # STABILITY CHECK: Pattern must be stable for 15 minutes
+        if liquidity_grab["detected"] and self._check_pattern_stability("liquidity_grab", liquidity_grab, stability_minutes=15):
             confluences.append({
                 "type": "LIQUIDITY_GRAB",
                 "score": 4,
@@ -495,7 +507,8 @@ class BullishProTraderGold:
             total_score += 4
 
         # Add FVG
-        if fvg_setup["detected"]:
+        # STABILITY CHECK: Pattern must be stable for 15 minutes
+        if fvg_setup["detected"] and self._check_pattern_stability("fvg", fvg_setup, stability_minutes=15):
             confluences.append({
                 "type": "FVG",
                 "score": 3,
@@ -517,7 +530,8 @@ class BullishProTraderGold:
             # Allow wicks into the zone, but not full candle closes below it
             ob_violated = current_price < ob_bottom or (current_candle_low < ob_bottom * 0.998)  # 0.2% buffer for wicks
 
-            if not ob_violated:
+            # STABILITY CHECK: Pattern must be stable for 15 minutes AND not violated
+            if not ob_violated and self._check_pattern_stability("order_block", ob_setup, stability_minutes=15):
                 confluences.append({
                     "type": "ORDER_BLOCK",
                     "score": 3,
@@ -525,12 +539,13 @@ class BullishProTraderGold:
                 })
                 total_score += 3
             else:
-                # OB was violated - do NOT add to confluence
+                # OB was violated OR not stable yet - do NOT add to confluence
                 # This prevents false high-score setups when price breaks through OB
                 pass
 
         # Add Breakout Retest
-        if breakout_setup["detected"]:
+        # STABILITY CHECK: Pattern must be stable for 15 minutes
+        if breakout_setup["detected"] and self._check_pattern_stability("breakout_retest", breakout_setup, stability_minutes=15):
             confluences.append({
                 "type": "BREAKOUT_RETEST",
                 "score": 2,
@@ -539,7 +554,8 @@ class BullishProTraderGold:
             total_score += 2
 
         # Add Demand Zone
-        if demand_setup["detected"]:
+        # STABILITY CHECK: Pattern must be stable for 15 minutes
+        if demand_setup["detected"] and self._check_pattern_stability("demand_zone", demand_setup, stability_minutes=15):
             confluences.append({
                 "type": "DEMAND_ZONE",
                 "score": 2,
@@ -669,20 +685,29 @@ class BullishProTraderGold:
             primary_setup["validation_warnings"] = validation_warnings
             primary_setup["candle_position"] = round(candle_position * 100, 1)
 
-            # Adjust confidence based on validation
-            if validation_warnings:
-                # Downgrade confidence if warnings present
-                if adjusted_score >= 10:
-                    primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME (⚠️ with warnings)"
-                elif adjusted_score >= 7:
-                    primary_setup["confidence"] = "⭐️⭐️ HIGH (⚠️ with warnings)"
-                elif adjusted_score >= 5:
-                    primary_setup["confidence"] = "⭐️ MODERATE (⚠️ with warnings)"
-                else:
-                    primary_setup["confidence"] = "⚠️ WEAK (wait for confirmation)"
-            else:
-                # No warnings - normal confidence
-                primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME" if total_score >= 10 else "⭐️⭐️ HIGH" if total_score >= 7 else "⭐️ MODERATE"
+            # ENTRY STATE SYSTEM: Replace confidence with clear entry states
+            entry_state_data = self._determine_entry_state(
+                total_score=total_score,
+                adjusted_score=adjusted_score,
+                validation_warnings=validation_warnings,
+                candle_position=candle_position,
+                candle_is_bearish=candle_is_bearish
+            )
+
+            primary_setup["entry_state"] = entry_state_data["entry_state"]
+            primary_setup["entry_signal"] = entry_state_data["entry_signal"]
+            primary_setup["state_description"] = entry_state_data["state_description"]
+            primary_setup["time_in_state_minutes"] = entry_state_data.get("time_in_state_minutes", 0)
+
+            # Keep confidence for backward compatibility but make it match entry state
+            if entry_state_data["entry_state"] == "🚀 STRONG ENTRY":
+                primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME"
+            elif entry_state_data["entry_state"] == "✅ READY TO ENTER":
+                primary_setup["confidence"] = "⭐️⭐️ HIGH" if adjusted_score >= 7 else "⭐️ MODERATE"
+            elif entry_state_data["entry_state"] == "⏳ SETUP FORMING":
+                primary_setup["confidence"] = "⏳ FORMING (wait for entry)"
+            else:  # SCANNING
+                primary_setup["confidence"] = "🔍 SCANNING"
 
             return primary_setup
 
@@ -697,6 +722,143 @@ class BullishProTraderGold:
             "total_score": total_score,
             "structure": structure,
             "description": "Scanning for professional setups..."
+        }
+
+    def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 15) -> bool:
+        """
+        Check if a pattern has been stable for minimum time (default 15 minutes)
+
+        Args:
+            pattern_name: Name of pattern (liquidity_grab, fvg, order_block, etc.)
+            pattern_data: Current pattern data
+            stability_minutes: Minimum minutes pattern must be present
+
+        Returns:
+            True if pattern is stable (present for >= stability_minutes), False otherwise
+        """
+        if not pattern_data or not pattern_data.get("detected"):
+            # Pattern not detected - clear tracker
+            self.pattern_tracker[pattern_name] = None
+            return False
+
+        now_utc = datetime.now(pytz.UTC)
+
+        # Check if we're tracking this pattern
+        tracked = self.pattern_tracker[pattern_name]
+
+        if tracked is None:
+            # First time seeing this pattern - start tracking
+            self.pattern_tracker[pattern_name] = {
+                "first_seen": now_utc,
+                "data": pattern_data
+            }
+            return False  # Not stable yet (just appeared)
+
+        # Pattern already being tracked - check if it's changed significantly
+        # Simple check: if key level changed by > 2 pips, reset tracker
+        old_level = tracked["data"].get("key_level", 0)
+        new_level = pattern_data.get("key_level", 0)
+
+        if abs(old_level - new_level) > 2:  # Pattern moved significantly
+            # Reset tracker with new data
+            self.pattern_tracker[pattern_name] = {
+                "first_seen": now_utc,
+                "data": pattern_data
+            }
+            return False
+
+        # Pattern stable - check if enough time has passed
+        time_stable = (now_utc - tracked["first_seen"]).total_seconds() / 60  # minutes
+
+        return time_stable >= stability_minutes
+
+    def _determine_entry_state(self, total_score: int, adjusted_score: int, validation_warnings: List[str],
+                               candle_position: float, candle_is_bearish: bool) -> Dict[str, Any]:
+        """
+        Determine clear entry state based on score and price action
+
+        States:
+        - 🔍 SCANNING: < 5 points, looking for patterns
+        - ⏳ SETUP FORMING: 5-6 points, patterns detected but not ready
+        - ✅ READY TO ENTER: 7+ points, bullish candle, good position
+        - 🚀 STRONG ENTRY: 10+ points, perfect conditions
+
+        Returns:
+            Dict with entry_state, entry_signal, state_description
+        """
+        now_utc = datetime.now(pytz.UTC)
+
+        # Determine base state from score
+        if adjusted_score < 5:
+            new_state = "🔍 SCANNING"
+            entry_signal = False
+            description = f"Looking for setups (need {5 - adjusted_score} more points)"
+
+        elif adjusted_score >= 5 and adjusted_score < 7:
+            # Check price action for entry readiness
+            if candle_is_bearish or candle_position < 40:
+                new_state = "⏳ SETUP FORMING"
+                entry_signal = False
+                description = f"Setup detected ({adjusted_score} points) - waiting for bullish confirmation"
+            else:
+                # Borderline - moderate confidence with good price action
+                new_state = "✅ READY TO ENTER"
+                entry_signal = True
+                description = f"Entry conditions met ({adjusted_score} points, moderate confidence)"
+
+        elif adjusted_score >= 7 and adjusted_score < 10:
+            # Check price action for entry readiness
+            if candle_is_bearish or candle_position < 30:
+                new_state = "⏳ SETUP FORMING"
+                entry_signal = False
+                description = f"Strong setup ({adjusted_score} points) - waiting for price confirmation"
+            else:
+                new_state = "✅ READY TO ENTER"
+                entry_signal = True
+                description = f"High confidence entry ({adjusted_score} points, good price action)"
+
+        else:  # 10+ points
+            # Check price action
+            if candle_is_bearish or candle_position < 30:
+                new_state = "⏳ SETUP FORMING"
+                entry_signal = False
+                description = f"Extreme setup ({adjusted_score} points) - waiting for bullish candle"
+            else:
+                new_state = "🚀 STRONG ENTRY"
+                entry_signal = True
+                description = f"STRONG ENTRY SIGNAL ({adjusted_score} points, excellent conditions)"
+
+        # STABILITY CHECK: Prevent state flickering
+        # Once in READY or STRONG state, stay there for minimum 5 minutes unless score drops significantly
+        if self.pattern_tracker["last_entry_state"] in ["✅ READY TO ENTER", "🚀 STRONG ENTRY"]:
+            if self.pattern_tracker["entry_state_since"]:
+                time_in_state = (now_utc - self.pattern_tracker["entry_state_since"]).total_seconds() / 60
+
+                # If we've been in entry state < 5 minutes and new state is not entry, stay in entry state
+                # UNLESS score dropped below 5 (setup actually failed)
+                if time_in_state < 5 and new_state in ["⏳ SETUP FORMING"] and adjusted_score >= 5:
+                    # Keep previous entry state (prevents flickering)
+                    return {
+                        "entry_state": self.pattern_tracker["last_entry_state"],
+                        "entry_signal": True,
+                        "state_description": description + " (entry active)",
+                        "time_in_state_minutes": round(time_in_state, 1)
+                    }
+
+        # Update state tracking
+        if new_state != self.pattern_tracker["last_entry_state"]:
+            self.pattern_tracker["last_entry_state"] = new_state
+            self.pattern_tracker["entry_state_since"] = now_utc
+
+        time_in_state = 0
+        if self.pattern_tracker["entry_state_since"]:
+            time_in_state = (now_utc - self.pattern_tracker["entry_state_since"]).total_seconds() / 60
+
+        return {
+            "entry_state": new_state,
+            "entry_signal": entry_signal,
+            "state_description": description,
+            "time_in_state_minutes": round(time_in_state, 1)
         }
 
     def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float, current_candle_low: float = None) -> Dict[str, Any]:
