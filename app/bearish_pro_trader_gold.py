@@ -66,6 +66,12 @@ class BearishProTraderGold:
                 "setup_progress": h1_setup["progress"],
                 "pattern_type": h1_setup["pattern_type"],
 
+                # Confluence data (NEW)
+                "confluences": h1_setup.get("confluences", []),
+                "total_score": h1_setup.get("total_score", 0),
+                "confidence": h1_setup.get("confidence", None),
+                "structure": h1_setup.get("structure", {"structure_type": "NEUTRAL", "score": 0}),
+
                 # Step-by-step breakdown
                 "setup_steps": self._build_setup_steps(h1_setup, current_price, current_candle, h1_data),
 
@@ -252,37 +258,322 @@ class BearishProTraderGold:
             "next_update": next_update
         }
 
+    def _check_bos_choch(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+        """
+        Check for Break of Structure (BOS) or Change of Character (CHoCH)
+
+        BOS = Price breaks previous swing high/low in SAME direction (trend continuation)
+        CHoCH = Price breaks previous swing high/low in OPPOSITE direction (trend reversal)
+
+        For BEARISH trader:
+        - Bearish BOS = Close below previous swing low (confirms downtrend)
+        - Bullish CHoCH = Close above previous lower high (signals potential reversal UP)
+
+        Returns:
+            - structure_type: "BEARISH_BOS", "BULLISH_CHOCH", or "NEUTRAL"
+            - score: +2 for BOS, -3 for CHoCH against trend
+            - swing_level: The level that was broken
+        """
+        if len(candles) < 20:
+            return {"structure_type": "NEUTRAL", "score": 0, "swing_level": None}
+
+        recent_candles = candles.tail(20)
+
+        # Identify swing highs and lows (local extremes)
+        swing_highs = []
+        swing_lows = []
+
+        for i in range(5, len(recent_candles) - 5):
+            candle = recent_candles.iloc[i]
+
+            # Swing High: high is higher than 5 candles before and after
+            if candle['high'] == recent_candles.iloc[i-5:i+6]['high'].max():
+                swing_highs.append({
+                    "level": float(candle['high']),
+                    "index": i,
+                    "time": candle.name
+                })
+
+            # Swing Low: low is lower than 5 candles before and after
+            if candle['low'] == recent_candles.iloc[i-5:i+6]['low'].min():
+                swing_lows.append({
+                    "level": float(candle['low']),
+                    "index": i,
+                    "time": candle.name
+                })
+
+        if not swing_highs and not swing_lows:
+            return {"structure_type": "NEUTRAL", "score": 0, "swing_level": None}
+
+        # Check for recent BOS or CHoCH (last 3 candles)
+        last_3_candles = recent_candles.tail(3)
+
+        # Check for BEARISH BOS (close below previous swing low)
+        if swing_lows:
+            latest_swing_low = swing_lows[-1]["level"]
+            for _, candle in last_3_candles.iterrows():
+                if candle['close'] < latest_swing_low:
+                    return {
+                        "structure_type": "BEARISH_BOS",
+                        "score": 2,
+                        "swing_level": latest_swing_low,
+                        "description": f"Bearish BOS detected! Price closed below swing low at ${latest_swing_low:.2f}"
+                    }
+
+        # Check for BULLISH CHoCH (close above previous lower high)
+        if len(swing_highs) >= 2:
+            # Check if we're in downtrend (lower highs)
+            recent_highs = swing_highs[-2:]
+            if recent_highs[-1]["level"] < recent_highs[-2]["level"]:
+                # We have lower highs (downtrend)
+                # Now check if price broke above the most recent lower high
+                latest_lower_high = recent_highs[-1]["level"]
+                for _, candle in last_3_candles.iterrows():
+                    if candle['close'] > latest_lower_high:
+                        return {
+                            "structure_type": "BULLISH_CHOCH",
+                            "score": -3,  # Negative score = filter out bearish setups
+                            "swing_level": latest_lower_high,
+                            "description": f"⚠️ Bullish CHoCH! Price broke above lower high at ${latest_lower_high:.2f} - Trend may be reversing"
+                        }
+
+        return {"structure_type": "NEUTRAL", "score": 0, "swing_level": None}
+
+    def _check_liquidity_grab(self, candles: pd.DataFrame, current_price: float, h4_levels: Dict) -> Dict[str, Any]:
+        """
+        Check for Liquidity Grab / Stop Hunt pattern
+
+        Liquidity Grab = Price spikes beyond key level to trigger stops, then reverses sharply
+        - Very high probability setup when combined with OB/FVG
+        - Shows institutions filling large orders after sweeping retail stops
+
+        For BEARISH trader, looking for:
+        - Price spikes ABOVE resistance/swing high (grabs buy stops)
+        - Large wick (20+ pips)
+        - Immediate rejection back below the level
+        - Entry on the reversal
+
+        Returns:
+            - detected: True if liquidity grab confirmed
+            - score: +4 points (highest priority)
+            - grab_level: The level where stops were grabbed
+            - grab_high: Highest point of the grab
+        """
+        if len(candles) < 10:
+            return {"detected": False, "score": 0}
+
+        recent_candles = candles.tail(10)
+
+        # Identify recent swing highs (local highs in last 10 candles)
+        swing_highs = []
+        for i in range(2, len(recent_candles) - 2):
+            candle = recent_candles.iloc[i]
+            window = recent_candles.iloc[max(0, i-2):min(len(recent_candles), i+3)]
+            if candle['high'] == window['high'].max():
+                swing_highs.append({
+                    "level": float(candle['high']),
+                    "index": i
+                })
+
+        if not swing_highs:
+            return {"detected": False, "score": 0}
+
+        # Check last 3 candles for liquidity grab pattern
+        last_3 = recent_candles.tail(3)
+
+        for swing_high in swing_highs:
+            swing_level = swing_high["level"]
+
+            for idx, candle in last_3.iterrows():
+                # Check if this candle spiked above the swing high
+                if candle['high'] > swing_level:
+                    # Measure wick size
+                    wick_size = candle['high'] - candle['close']
+
+                    # Liquidity grab requirements:
+                    # 1. Wick extends 5+ pips above swing level
+                    # 2. Strong rejection (wick 20+ pips OR 15+ pips)
+                    # 3. Candle closed back below swing level
+
+                    pips_above_swing = candle['high'] - swing_level
+
+                    if pips_above_swing >= 0.5 and wick_size >= 1.5 and candle['close'] < swing_level:
+                        # Liquidity grab confirmed!
+                        return {
+                            "detected": True,
+                            "score": 4,  # Highest score
+                            "grab_level": swing_level,
+                            "grab_high": float(candle['high']),
+                            "rejection_size": round(wick_size, 1),
+                            "pips_above": round(pips_above_swing, 1),
+                            "description": f"🔥 Liquidity Grab at ${swing_level:.2f}! Price spiked to ${candle['high']:.2f} ({pips_above_swing:.1f} pips above) then rejected {wick_size:.1f} pips DOWN"
+                        }
+
+        # Also check H4 resistance levels for liquidity grabs
+        resistance_levels = h4_levels.get("resistance_levels", [])
+        for resistance in resistance_levels:
+            if abs(resistance - current_price) < 30:  # Only check nearby levels
+                for idx, candle in last_3.iterrows():
+                    if candle['high'] > resistance:
+                        wick_size = candle['high'] - candle['close']
+                        pips_above = candle['high'] - resistance
+
+                        if pips_above >= 0.5 and wick_size >= 1.5 and candle['close'] < resistance:
+                            return {
+                                "detected": True,
+                                "score": 4,
+                                "grab_level": resistance,
+                                "grab_high": float(candle['high']),
+                                "rejection_size": round(wick_size, 1),
+                                "pips_above": round(pips_above, 1),
+                                "description": f"🔥 Liquidity Grab at H4 resistance ${resistance:.2f}! Price spiked to ${candle['high']:.2f} then rejected {wick_size:.1f} pips"
+                            }
+
+        return {"detected": False, "score": 0}
+
     async def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
         """
-        Detect which professional setup pattern is forming
-        Returns detailed pattern information
+        Detect which professional setup patterns are forming
+
+        NEW PROFESSIONAL APPROACH:
+        - Checks ALL patterns (not just first match)
+        - Calculates confluence score
+        - Filters by trend (BOS/CHoCH)
+        - Prioritizes liquidity grabs
+        - Returns combined analysis
         """
         key_level = h4_levels["key_level"]
-        last_candles = h1_data.tail(20)  # Increased for FVG detection
+        last_candles = h1_data.tail(20)  # Need more candles for FVG detection
 
         # Get current candle info to check if high touched key zones
         current_candle_info = await self._get_current_candle_info(h1_data, current_price)
         current_candle_high = current_candle_info.get("high")
 
-        # Check for FAIR VALUE GAP (FVG) - HIGHEST PRIORITY
+        # STEP 1: Check trend structure (BOS/CHoCH) - FILTER FIRST
+        structure = self._check_bos_choch(last_candles, current_price)
+
+        # If bullish CHoCH detected, filter out bearish setups
+        if structure["structure_type"] == "BULLISH_CHOCH":
+            return {
+                "detected": True,
+                "pattern_type": "FILTERED_OUT",
+                "state": "BULLISH_CHOCH_DETECTED",
+                "progress": "0/5",
+                "structure": structure,
+                "description": "⚠️ Bullish CHoCH detected - Filtering out bearish setups until trend confirmation",
+                "confluences": [],
+                "total_score": structure["score"]
+            }
+
+        # STEP 2: Check ALL patterns (don't stop at first match)
         fvg_setup = self._check_fvg(last_candles, current_price, current_candle_high)
-        if fvg_setup["detected"]:
-            return fvg_setup
-
-        # Check for ORDER BLOCK - SECOND PRIORITY
         ob_setup = self._check_order_block(last_candles, current_price, current_candle_high)
-        if ob_setup["detected"]:
-            return ob_setup
-
-        # Check for BREAKDOWN RETEST pattern
         breakdown_setup = self._check_breakout_retest(last_candles, key_level, current_price, current_candle_high)
-        if breakdown_setup["detected"]:
-            return breakdown_setup
-
-        # Check for SUPPLY ZONE pattern (bearish resistance zone)
         supply_setup = self._check_supply_zone(last_candles, h4_levels, current_price, current_candle_high)
+        liquidity_grab = self._check_liquidity_grab(last_candles, current_price, h4_levels)
+
+        # STEP 3: Calculate confluence score
+        confluences = []
+        total_score = 0
+
+        # Add structure score
+        total_score += structure["score"]
+        if structure["structure_type"] == "BEARISH_BOS":
+            confluences.append({
+                "type": "BEARISH_BOS",
+                "score": 2,
+                "description": structure["description"]
+            })
+
+        # Add liquidity grab (highest priority)
+        if liquidity_grab["detected"]:
+            confluences.append({
+                "type": "LIQUIDITY_GRAB",
+                "score": 4,
+                "details": liquidity_grab,
+                "description": liquidity_grab["description"]
+            })
+            total_score += 4
+
+        # Add FVG
+        if fvg_setup["detected"]:
+            confluences.append({
+                "type": "FVG",
+                "score": 3,
+                "details": fvg_setup,
+                "description": f"FVG at ${fvg_setup.get('fvg_zone', {}).get('midpoint', 0):.2f}"
+            })
+            total_score += 3
+
+        # Add Order Block
+        if ob_setup["detected"]:
+            confluences.append({
+                "type": "ORDER_BLOCK",
+                "score": 3,
+                "details": ob_setup,
+                "description": f"Order Block at ${ob_setup.get('ob_zone', {}).get('midpoint', 0):.2f}"
+            })
+            total_score += 3
+
+        # Add Breakdown Retest
+        if breakdown_setup["detected"]:
+            confluences.append({
+                "type": "BREAKDOWN_RETEST",
+                "score": 2,
+                "details": breakdown_setup,
+                "description": f"Breakdown Retest at ${breakdown_setup.get('key_level', 0):.2f}"
+            })
+            total_score += 2
+
+        # Add Supply Zone
         if supply_setup["detected"]:
-            return supply_setup
+            confluences.append({
+                "type": "SUPPLY_ZONE",
+                "score": 2,
+                "details": supply_setup,
+                "description": f"Supply Zone at ${supply_setup.get('key_level', 0):.2f}"
+            })
+            total_score += 2
+
+        # STEP 4: Determine if we have enough confluence to enter
+        if total_score < 5:
+            # Not enough confluence
+            return {
+                "detected": True,
+                "pattern_type": "LOW_CONFLUENCE",
+                "state": "SCANNING",
+                "progress": "0/5",
+                "confluences": confluences,
+                "total_score": total_score,
+                "structure": structure,
+                "description": f"⚠️ Low confluence (Score: {total_score}/5 minimum) - Need more confirmation"
+            }
+
+        # STEP 5: We have confluence! Return the primary pattern
+        # Priority: Liquidity Grab > FVG > OB > Breakdown > Supply
+        primary_setup = None
+        if liquidity_grab["detected"] and fvg_setup["detected"]:
+            primary_setup = fvg_setup
+            primary_setup["pattern_type"] = "FVG_CONFLUENCE"
+        elif liquidity_grab["detected"] and ob_setup["detected"]:
+            primary_setup = ob_setup
+            primary_setup["pattern_type"] = "OB_CONFLUENCE"
+        elif fvg_setup["detected"]:
+            primary_setup = fvg_setup
+        elif ob_setup["detected"]:
+            primary_setup = ob_setup
+        elif breakdown_setup["detected"]:
+            primary_setup = breakdown_setup
+        elif supply_setup["detected"]:
+            primary_setup = supply_setup
+
+        if primary_setup:
+            # Enhance with confluence data
+            primary_setup["confluences"] = confluences
+            primary_setup["total_score"] = total_score
+            primary_setup["structure"] = structure
+            primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME" if total_score >= 10 else "⭐️⭐️ HIGH" if total_score >= 7 else "⭐️ MODERATE"
+            return primary_setup
 
         # Default: SCANNING
         return {
@@ -291,7 +582,9 @@ class BearishProTraderGold:
             "state": "SCANNING",
             "progress": "0/5",
             "key_level": key_level,
-            "confirmations": 0,
+            "confluences": confluences,
+            "total_score": total_score,
+            "structure": structure,
             "description": "Scanning for professional setups..."
         }
 
