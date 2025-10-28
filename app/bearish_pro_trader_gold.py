@@ -561,6 +561,87 @@ class BearishProTraderGold:
                 "description": f"⚠️ Low confluence (Score: {total_score}/5 minimum) - Need more confirmation"
             }
 
+        # STEP 4.5: SMART VALIDATION - Check price action, distance, and timing
+        validation_warnings = []
+        confidence_penalty = 0
+
+        # Get current candle data
+        last_candle = last_candles.iloc[-1]
+        candle_open = last_candle['open']
+        candle_high = last_candles['high'].iloc[-1]
+        candle_low = last_candles['low'].iloc[-1]
+        candle_range = candle_high - candle_low
+
+        # 1. PRICE ACTION CHECK: Is candle bullish or bearish?
+        candle_is_bullish = current_price > candle_open  # For bearish setups, we want bearish candles
+        price_from_low = current_price - candle_low
+        price_from_high = candle_high - current_price
+        candle_position = (current_price - candle_low) / candle_range if candle_range > 0 else 0.5
+
+        if candle_is_bullish:
+            validation_warnings.append("⚠️ Bullish candle (price above open)")
+            confidence_penalty += 2
+
+        if candle_position > 0.7:  # In top 30% of candle (bad for bearish)
+            validation_warnings.append("📈 Price at candle highs (weak position)")
+            confidence_penalty += 2
+        elif candle_position > 0.5:  # In upper half
+            validation_warnings.append("⚠️ Price in upper half of candle")
+            confidence_penalty += 1
+
+        # 2. CONFLUENCE DISTANCE CHECK: Are patterns close to current price?
+        distant_patterns = []
+
+        # Check Order Block distance
+        if ob_setup["detected"]:
+            ob_zone = ob_setup.get('order_block_zone', {})
+            ob_bottom = ob_zone.get('bottom', 0)
+            ob_distance = abs(current_price - ob_bottom)
+            if ob_distance > 20:  # More than 20 pips away
+                distant_patterns.append(f"Order Block ({ob_distance:.1f} pips away)")
+                confidence_penalty += 1
+
+        # Check FVG distance
+        if fvg_setup["detected"]:
+            fvg_zone = fvg_setup.get('fvg_zone', {})
+            fvg_mid = fvg_zone.get('midpoint', current_price)
+            fvg_distance = abs(current_price - fvg_mid)
+            if fvg_distance > 15:  # More than 15 pips away
+                distant_patterns.append(f"FVG ({fvg_distance:.1f} pips away)")
+                confidence_penalty += 1
+
+        if distant_patterns:
+            validation_warnings.append(f"📍 Distant confluences: {', '.join(distant_patterns)}")
+
+        # 3. MOMENTUM CHECK: Last 3 candles direction
+        if len(last_candles) >= 3:
+            last_3_closes = last_candles['close'].iloc[-3:].values
+            bullish_momentum = sum(last_3_closes[i] > last_3_closes[i-1] for i in range(1, len(last_3_closes)))
+            if bullish_momentum >= 2:  # 2+ bullish candles (bad for bearish setup)
+                validation_warnings.append("📈 Bullish momentum (last 3 candles)")
+                confidence_penalty += 2
+
+        # 4. ADJUST CONFIDENCE based on validation
+        adjusted_score = total_score - confidence_penalty
+
+        # Determine final confidence with validation
+        if validation_warnings:
+            if adjusted_score < 5:
+                # Too many warnings - don't show as ready entry
+                return {
+                    "detected": True,
+                    "pattern_type": "CONFLUENCE_DETECTED",
+                    "state": "WAITING_CONFIRMATION",
+                    "progress": "3/5",
+                    "confluences": confluences,
+                    "total_score": total_score,
+                    "adjusted_score": adjusted_score,
+                    "structure": structure,
+                    "validation_warnings": validation_warnings,
+                    "candle_position": round(candle_position * 100, 1),
+                    "description": f"⏳ Setup detected ({total_score} points) but price action weak - WAIT FOR CONFIRMATION"
+                }
+
         # STEP 5: We have confluence! Return the primary pattern
         # Priority: Liquidity Grab > FVG > OB > Breakdown > Supply
         primary_setup = None
@@ -583,8 +664,26 @@ class BearishProTraderGold:
             # Enhance with confluence data
             primary_setup["confluences"] = confluences
             primary_setup["total_score"] = total_score
+            primary_setup["adjusted_score"] = adjusted_score if validation_warnings else total_score
             primary_setup["structure"] = structure
-            primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME" if total_score >= 10 else "⭐️⭐️ HIGH" if total_score >= 7 else "⭐️ MODERATE"
+            primary_setup["validation_warnings"] = validation_warnings
+            primary_setup["candle_position"] = round(candle_position * 100, 1)
+
+            # Adjust confidence based on validation
+            if validation_warnings:
+                # Downgrade confidence if warnings present
+                if adjusted_score >= 10:
+                    primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME (⚠️ with warnings)"
+                elif adjusted_score >= 7:
+                    primary_setup["confidence"] = "⭐️⭐️ HIGH (⚠️ with warnings)"
+                elif adjusted_score >= 5:
+                    primary_setup["confidence"] = "⭐️ MODERATE (⚠️ with warnings)"
+                else:
+                    primary_setup["confidence"] = "⚠️ WEAK (wait for confirmation)"
+            else:
+                # No warnings - normal confidence
+                primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME" if total_score >= 10 else "⭐️⭐️ HIGH" if total_score >= 7 else "⭐️ MODERATE"
+
             return primary_setup
 
         # Default: SCANNING
