@@ -363,7 +363,8 @@ class BearishProTraderGold:
 
                     # Check for BEARISH rejection (long UPPER wick + close BELOW)
                     wick_size = candle['high'] - max(candle['open'], candle['close'])
-                    if wick_size > 3 and candle['close'] < key_level - 5:
+                    # wick_size > 0.3 = 3 pips, close < key_level - 0.5 = 5 pips below
+                    if wick_size > 0.3 and candle['close'] < key_level - 0.5:
                         rejection_confirmed = True
 
         # Determine state

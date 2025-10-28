@@ -365,7 +365,8 @@ class BullishProTraderGold:
 
                     # Check for BULLISH rejection (long LOWER wick + close ABOVE)
                     wick_size = min(candle['open'], candle['close']) - candle['low']
-                    if wick_size > 3 and candle['close'] > key_level + 5:
+                    # wick_size > 0.3 = 3 pips, close > key_level + 0.5 = 5 pips above
+                    if wick_size > 0.3 and candle['close'] > key_level + 0.5:
                         rejection_confirmed = True
 
         # Determine state
