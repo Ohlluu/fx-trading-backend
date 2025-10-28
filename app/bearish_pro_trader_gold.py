@@ -265,7 +265,7 @@ class BearishProTraderGold:
         current_candle_high = current_candle_info.get("high")
 
         # Check for FAIR VALUE GAP (FVG) - HIGHEST PRIORITY
-        fvg_setup = self._check_fvg(last_candles, current_price)
+        fvg_setup = self._check_fvg(last_candles, current_price, current_candle_high)
         if fvg_setup["detected"]:
             return fvg_setup
 
@@ -401,7 +401,7 @@ class BearishProTraderGold:
             "expected_entry": current_price
         }
 
-    def _check_fvg(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
+    def _check_fvg(self, candles: pd.DataFrame, current_price: float, current_candle_high: float = None) -> Dict[str, Any]:
         """
         Check for BEARISH Fair Value Gap (FVG) pattern:
 
@@ -413,6 +413,11 @@ class BearishProTraderGold:
         If Candle3.high < Candle1.low → There's a GAP!
         The gap zone is unfilled price area where NO trades occurred
         Price is magnetically pulled back UP to "fill" this gap
+
+        Args:
+            candles: Historical H1 candles
+            current_price: Current market price
+            current_candle_high: High of the forming candle (from M5 data)
         """
         if len(candles) < 10:
             return {"detected": False}
@@ -472,8 +477,22 @@ class BearishProTraderGold:
         if distance_to_fvg > 20:
             return {"detected": False}  # Too far away
 
+        # Check if current candle's high touched the FVG zone (M5 precision)
+        candle_touched_fvg = False
+        strong_rejection = False
+        if current_candle_high is not None:
+            # Check if the high of current candle went into or above the FVG zone
+            if current_candle_high >= nearest_fvg["bottom"]:
+                candle_touched_fvg = True
+
+                # Check for STRONG REJECTION:
+                # If price touched FVG and dropped 15+ pips from the touch point
+                rejection_distance = current_candle_high - current_price
+                if rejection_distance >= 1.5:  # 15 pips or more
+                    strong_rejection = True
+
         # Determine state based on proximity and price action
-        if current_price >= nearest_fvg["bottom"] and current_price <= nearest_fvg["top"]:
+        if candle_touched_fvg or (current_price >= nearest_fvg["bottom"] and current_price <= nearest_fvg["top"]):
             state = "IN_FVG"
             progress = "3/5"
             confirmations = 2
@@ -502,7 +521,8 @@ class BearishProTraderGold:
                 "size_pips": nearest_fvg["size"],
                 "age_candles": nearest_fvg["age_candles"]
             },
-            "distance_pips": float(distance_to_fvg)
+            "distance_pips": float(distance_to_fvg),
+            "strong_rejection": strong_rejection  # Conservative confirmation flag
         }
 
     def _check_order_block(self, candles: pd.DataFrame, current_price: float, current_candle_high: float = None) -> Dict[str, Any]:
@@ -1353,7 +1373,8 @@ class BearishProTraderGold:
                     },
                     {
                         "type": "Option B: Wait for bearish confirmation (Conservative)",
-                        "trigger": "Wait for 1H bearish candle inside FVG zone",
+                        "trigger": "Wait for: (1) 1H bearish candle close inside FVG OR (2) Strong rejection (15+ pip drop from FVG)",
+                        "confirmed": setup.get("strong_rejection", False),
                         "pros": "Confirmation of sellers stepping in",
                         "cons": "Slightly worse entry price"
                     }
