@@ -692,10 +692,17 @@ class BullishProTraderGold:
 
         # Check if current candle's low touched the OB zone
         candle_touched_ob = False
+        strong_rejection = False
         if current_candle_low is not None:
             # Check if the low of current candle went into or below the OB zone
             if current_candle_low <= nearest_ob["top"]:
                 candle_touched_ob = True
+
+                # Check for STRONG REJECTION:
+                # If price touched OB and bounced 15+ pips from the touch point
+                rejection_distance = current_price - current_candle_low
+                if rejection_distance >= 1.5:  # 15 pips or more
+                    strong_rejection = True
 
         # Determine state based on proximity and M5 data
         if current_price <= nearest_ob["top"] and current_price >= nearest_ob["bottom"]:
@@ -775,6 +782,7 @@ class BullishProTraderGold:
             "key_level": nearest_ob["midpoint"],
             "confirmations": confirmations,
             "expected_entry": nearest_ob["midpoint"],
+            "strong_rejection": strong_rejection,  # Conservative confirmation flag
             "order_block_zone": {
                 "top": nearest_ob["top"],
                 "bottom": nearest_ob["bottom"],
@@ -1269,7 +1277,8 @@ class BullishProTraderGold:
                         "risk_pips": f"{sl_tp['risk_pips'] + 5:.1f} pips (slightly more)",
                         "reward_pips": f"{sl_tp['reward_pips'] - 5:.1f} pips (slightly less)",
                         "risk_reward": f"1:{(sl_tp['reward_pips'] - 5) / (sl_tp['risk_pips'] + 5):.1f}",
-                        "trigger": "Wait for 1H bullish candle to close inside OB zone",
+                        "trigger": "Wait for: (1) 1H bullish candle close inside OB OR (2) Strong rejection (15+ pip bounce from OB)",
+                        "confirmed": setup.get("strong_rejection", False),
                         "pros": "Confirmation of buyers stepping in",
                         "cons": "Slightly worse entry price",
                         "why_sl": f"SL at ${sl_tp['stop_loss']:.2f} - If price closes below OB zone, setup is invalidated",

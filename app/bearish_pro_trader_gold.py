@@ -605,10 +605,17 @@ class BearishProTraderGold:
 
         # Check if current candle's high touched the OB zone
         candle_touched_ob = False
+        strong_rejection = False
         if current_candle_high is not None:
             # Check if the high of current candle went into or above the OB zone
             if current_candle_high >= nearest_ob["bottom"]:
                 candle_touched_ob = True
+
+                # Check for STRONG REJECTION:
+                # If price touched OB and dropped 15+ pips from the touch point
+                rejection_distance = current_candle_high - current_price
+                if rejection_distance >= 1.5:  # 15 pips or more
+                    strong_rejection = True
 
         # Determine state based on proximity
         if current_price >= nearest_ob["bottom"] and current_price <= nearest_ob["top"]:
@@ -679,7 +686,8 @@ class BearishProTraderGold:
                 "size_pips": nearest_ob["size"],
                 "age_candles": nearest_ob["age_candles"]
             },
-            "distance_pips": float(distance_to_ob)
+            "distance_pips": float(distance_to_ob),
+            "strong_rejection": strong_rejection  # Conservative confirmation flag
         }
 
     def _check_supply_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
@@ -1493,7 +1501,8 @@ class BearishProTraderGold:
                         "risk_pips": f"{sl_tp['risk_pips'] + 5:.1f} pips (slightly more)",
                         "reward_pips": f"{sl_tp['reward_pips'] - 5:.1f} pips (slightly less)",
                         "risk_reward": f"1:{(sl_tp['reward_pips'] - 5) / (sl_tp['risk_pips'] + 5):.1f}",
-                        "trigger": "Wait for 1H bearish candle to close inside OB zone",
+                        "trigger": "Wait for: (1) 1H bearish candle close inside OB OR (2) Strong rejection (15+ pip drop from OB)",
+                        "confirmed": setup.get("strong_rejection", False),
                         "pros": "Confirmation of sellers stepping in",
                         "cons": "Slightly worse entry price",
                         "why_sl": f"SL at ${sl_tp['stop_loss']:.2f} - If price closes above OB zone, setup is invalidated",
