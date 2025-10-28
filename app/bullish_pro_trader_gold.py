@@ -282,7 +282,7 @@ class BullishProTraderGold:
             return breakout_setup
 
         # Check for DEMAND ZONE pattern
-        demand_setup = self._check_demand_zone(last_candles, h4_levels, current_price)
+        demand_setup = self._check_demand_zone(last_candles, h4_levels, current_price, current_candle_low)
         if demand_setup["detected"]:
             return demand_setup
 
@@ -404,31 +404,74 @@ class BullishProTraderGold:
             "rejection_confirmed": rejection_confirmed  # Conservative confirmation flag
         }
 
-    def _check_demand_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
+    def _check_demand_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float, current_candle_low: float = None) -> Dict[str, Any]:
         """
-        Check for Demand Zone pattern
-        (Simplified for now)
+        Check for DEMAND ZONE pattern (BULLISH):
+        - Price approaching H4 SUPPORT level where buyers historically defended
+        - Looking for bullish rejection + LONG opportunity
+
+        Similar to Order Block but at H4 key levels
+
+        Args:
+            candles: Historical H1 candles
+            h4_levels: H4 support/resistance levels
+            current_price: Current market price
+            current_candle_low: Low of the forming candle (from M5 data)
         """
         support_levels = h4_levels.get("support_levels", [])
 
         if not support_levels:
             return {"detected": False}
 
-        # Check if price is near a support level
+        # Find nearest support level
         nearest_support = min(support_levels, key=lambda x: abs(x - current_price))
 
-        if abs(current_price - nearest_support) < 10:
-            return {
-                "detected": True,
-                "pattern_type": "DEMAND_ZONE",
-                "state": "WATCHING",
-                "progress": "2/5",
-                "key_level": nearest_support,
-                "confirmations": 0,
-                "expected_entry": current_price
-            }
+        # Check if price is within 10 pips of support
+        distance_to_support = current_price - nearest_support
 
-        return {"detected": False}
+        if distance_to_support > 10 or distance_to_support < -5:
+            return {"detected": False}  # Too far away or already bounced too much
+
+        # Check if current candle's low touched the support zone (M5 precision)
+        candle_touched_support = False
+        strong_rejection = False
+        if current_candle_low is not None:
+            # Check if the low of current candle went into or below the support zone
+            if current_candle_low <= nearest_support + 3:  # Within 3 pips of support
+                candle_touched_support = True
+
+                # Check for STRONG REJECTION:
+                # If price touched support and bounced 15+ pips from the touch point
+                rejection_distance = current_price - current_candle_low
+                if rejection_distance >= 1.5:  # 15 pips or more
+                    strong_rejection = True
+
+        # Determine state based on price action
+        if candle_touched_support:
+            state = "AT_ZONE"
+            progress = "2/5"
+            confirmations = 1
+        elif distance_to_support <= 5:
+            state = "APPROACHING"
+            progress = "1/5"
+            confirmations = 0
+        else:
+            state = "DETECTED"
+            progress = "1/5"
+            confirmations = 0
+
+        return {
+            "detected": True,
+            "pattern_type": "DEMAND_ZONE",
+            "direction": "LONG",
+            "state": state,
+            "progress": progress,
+            "key_level": nearest_support,
+            "confirmations": confirmations,
+            "expected_entry": nearest_support,
+            "distance_pips": float(distance_to_support),
+            "strong_rejection": strong_rejection  # Conservative confirmation flag
+        }
 
     def _check_fvg(self, candles: pd.DataFrame, current_price: float, current_candle_low: float = None) -> Dict[str, Any]:
         """
@@ -1086,16 +1129,98 @@ class BullishProTraderGold:
         return steps
 
     def _demand_zone_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
-        """Steps for demand zone pattern"""
-        return [
-            {
-                "step": 1,
+        """
+        Create detailed steps for DEMAND ZONE pattern (BULLISH)
+        H4 Support level where buyers historically defended
+        """
+        key_level = setup["key_level"]
+        state = setup["state"]
+        distance_pips = setup.get("distance_pips", 0)
+
+        steps = []
+
+        # Step 1: Demand Zone Detected
+        steps.append({
+            "step": 1,
+            "status": "complete",
+            "title": f"🛡️ Demand Zone at ${key_level:.2f}",
+            "details": f"H4 Support level | Current price: ${current_price:.2f} ({distance_pips:.1f} pips away)",
+            "explanation": "This is a key H4 support level where buyers historically defended. Institutions often place BUY orders here."
+        })
+
+        # Step 2: Price Action
+        if state == "AT_ZONE":
+            steps.append({
+                "step": 2,
+                "status": "ready",
+                "title": "🎯 READY TO ENTER",
+                "details": f"Price touched support at ${key_level:.2f}",
+                "explanation": "Price reached the demand zone. Looking for bullish reaction."
+            })
+
+            # Calculate SL/TP
+            stop_loss = key_level - 5  # 5 pips below support
+            risk_pips = abs(current_price - stop_loss) / 0.1
+            take_profit = current_price + (risk_pips * 2 * 0.1)  # 1:2 R:R minimum
+            reward_pips = abs(take_profit - current_price) / 0.1
+
+            # Step 3: Entry Options
+            steps.append({
+                "step": 3,
+                "status": "ready",
+                "title": "🎯 Entry Options",
+                "entry_options": [
+                    {
+                        "type": "Option A: Enter at support level (Aggressive)",
+                        "entry": f"${key_level:.2f}",
+                        "stop_loss": f"${stop_loss:.2f}",
+                        "take_profit": f"${take_profit:.2f}",
+                        "risk_pips": f"{risk_pips:.1f} pips",
+                        "reward_pips": f"{reward_pips:.1f} pips",
+                        "risk_reward": f"1:{reward_pips/risk_pips:.1f}",
+                        "trigger": f"Enter NOW at ${current_price:.2f}",
+                        "pros": "Best entry price, catch full move",
+                        "cons": "No confirmation yet",
+                        "why_sl": f"SL at ${stop_loss:.2f} - If price closes below support, level is broken",
+                        "why_tp": f"TP at ${take_profit:.2f} - Next resistance or 1:2 R:R minimum"
+                    },
+                    {
+                        "type": "Option B: Wait for bullish rejection (Conservative)",
+                        "entry": f"Wait for rejection (est. ${current_price + 5:.2f})",
+                        "stop_loss": f"${stop_loss:.2f}",
+                        "take_profit": f"${take_profit:.2f}",
+                        "risk_pips": f"{risk_pips + 5:.1f} pips (slightly more)",
+                        "reward_pips": f"{reward_pips - 5:.1f} pips (slightly less)",
+                        "risk_reward": f"1:{(reward_pips - 5)/(risk_pips + 5):.1f}",
+                        "trigger": "Wait for: Strong rejection (15+ pip bounce from support)",
+                        "confirmed": setup.get("strong_rejection", False),
+                        "pros": "Confirmation of buyers defending support",
+                        "cons": "Slightly worse entry price",
+                        "why_sl": f"SL at ${stop_loss:.2f} - If price closes below support, level is broken",
+                        "why_tp": f"TP at ${take_profit:.2f} - Next resistance or 1:2 R:R minimum"
+                    }
+                ],
+                "recommendation": "Option A for aggressive (support entry), Option B for conservative (wait for rejection)",
+                "explanation": "Demand Zone activated! Buyers should defend this H4 support. High probability bounce UP."
+            })
+        elif state == "APPROACHING":
+            steps.append({
+                "step": 2,
                 "status": "in_progress",
-                "title": "Price at demand zone",
-                "details": f"Support level: ${setup['key_level']:.2f}",
-                "explanation": "Waiting for reaction at this level"
-            }
-        ]
+                "title": f"⏳ Price approaching demand zone ({distance_pips:.1f} pips away)",
+                "details": f"Current: ${current_price:.2f} → Target: ${key_level:.2f}",
+                "explanation": "Price is dropping toward H4 support. Prepare for potential bullish reaction."
+            })
+        else:  # DETECTED
+            steps.append({
+                "step": 2,
+                "status": "waiting",
+                "title": f"Demand zone detected {distance_pips:.1f} pips below",
+                "details": f"Waiting for price to drop from ${current_price:.2f} to ${key_level:.2f}",
+                "explanation": "H4 support below. Price may drop to this level before bouncing."
+            })
+
+        return steps
 
     def _fvg_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
         """

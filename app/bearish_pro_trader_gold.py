@@ -280,7 +280,7 @@ class BearishProTraderGold:
             return breakdown_setup
 
         # Check for SUPPLY ZONE pattern (bearish resistance zone)
-        supply_setup = self._check_supply_zone(last_candles, h4_levels, current_price)
+        supply_setup = self._check_supply_zone(last_candles, h4_levels, current_price, current_candle_high)
         if supply_setup["detected"]:
             return supply_setup
 
@@ -711,65 +711,74 @@ class BearishProTraderGold:
             "strong_rejection": strong_rejection  # Conservative confirmation flag
         }
 
-    def _check_supply_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
+    def _check_supply_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float, current_candle_high: float = None) -> Dict[str, Any]:
         """
         Check for SUPPLY ZONE pattern (BEARISH):
-        - Price approaching a RESISTANCE level where sellers historically defended
+        - Price approaching H4 RESISTANCE level where sellers historically defended
         - Looking for bearish rejection + SHORT opportunity
+
+        Similar to Order Block but at H4 key levels
+
+        Args:
+            candles: Historical H1 candles
+            h4_levels: H4 support/resistance levels
+            current_price: Current market price
+            current_candle_high: High of the forming candle (from M5 data)
         """
         resistance_levels = h4_levels.get("resistance_levels", [])
 
         if not resistance_levels:
             return {"detected": False}
 
-        # Check if price is near a resistance level (within 10 pips)
+        # Find nearest resistance level
         nearest_resistance = min(resistance_levels, key=lambda x: abs(x - current_price))
 
-        # SUPPLY ZONE detected if price is within 10 pips of resistance
-        if abs(current_price - nearest_resistance) < 10:
-            # Check recent candles for bearish confirmation
-            last_candle = candles.iloc[-1]
+        # Check if price is within 10 pips of resistance
+        distance_to_resistance = nearest_resistance - current_price
 
-            # Calculate rejection signs
-            upper_wick = last_candle['high'] - max(last_candle['open'], last_candle['close'])
-            body_size = abs(last_candle['close'] - last_candle['open'])
-            is_bearish = last_candle['close'] < last_candle['open']
+        if distance_to_resistance > 10 or distance_to_resistance < -5:
+            return {"detected": False}  # Too far away or already dropped too much
 
-            # Determine state based on confirmation level
+        # Check if current candle's high touched the resistance zone (M5 precision)
+        candle_touched_resistance = False
+        strong_rejection = False
+        if current_candle_high is not None:
+            # Check if the high of current candle went into or above the resistance zone
+            if current_candle_high >= nearest_resistance - 3:  # Within 3 pips of resistance
+                candle_touched_resistance = True
+
+                # Check for STRONG REJECTION:
+                # If price touched resistance and dropped 15+ pips from the touch point
+                rejection_distance = current_candle_high - current_price
+                if rejection_distance >= 1.5:  # 15 pips or more
+                    strong_rejection = True
+
+        # Determine state based on price action
+        if candle_touched_resistance:
+            state = "AT_ZONE"
+            progress = "2/5"
+            confirmations = 1
+        elif distance_to_resistance <= 5:
+            state = "APPROACHING"
+            progress = "1/5"
             confirmations = 0
-            if upper_wick > 3:  # Long upper wick = rejection at resistance
-                confirmations += 1
-            if is_bearish and body_size > 5:  # Strong bearish candle
-                confirmations += 1
+        else:
+            state = "DETECTED"
+            progress = "1/5"
+            confirmations = 0
 
-            # Determine progress
-            if confirmations >= 2:
-                state = "REJECTION_CONFIRMED"
-                progress = "3/5"
-            elif confirmations == 1:
-                state = "WATCHING"
-                progress = "2/5"
-            else:
-                state = "AT_ZONE"
-                progress = "1/5"
-
-            return {
-                "detected": True,
-                "pattern_type": "SUPPLY_ZONE",
-                "direction": "SHORT",
-                "state": state,
-                "progress": progress,
-                "key_level": nearest_resistance,
-                "confirmations": confirmations,
-                "expected_entry": current_price,
-                "rejection_signs": {
-                    "upper_wick": float(upper_wick),
-                    "is_bearish": is_bearish,
-                    "body_size": float(body_size)
-                }
-            }
-
-        return {"detected": False}
+        return {
+            "detected": True,
+            "pattern_type": "SUPPLY_ZONE",
+            "direction": "SHORT",
+            "state": state,
+            "progress": progress,
+            "key_level": nearest_resistance,
+            "confirmations": confirmations,
+            "expected_entry": nearest_resistance,
+            "distance_pips": float(distance_to_resistance),
+            "strong_rejection": strong_rejection  # Conservative confirmation flag
+        }
 
     async def _get_current_candle_info(self, h1_data: pd.DataFrame, current_price: float) -> Dict[str, Any]:
         """
@@ -1213,124 +1222,117 @@ class BearishProTraderGold:
     def _supply_zone_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
         """
         Create detailed steps for SUPPLY ZONE pattern (BEARISH)
-        Price approaching resistance where sellers historically defended
+        H4 resistance level where sellers historically defended
         """
         key_level = setup["key_level"]
         state = setup["state"]
-        confirmations = setup.get("confirmations", 0)
-        rejection_signs = setup.get("rejection_signs", {})
+        distance_pips = setup.get("distance_pips", 0)
+        strong_rejection = setup.get("strong_rejection", False)
 
         steps = []
 
-        # Step 1: Price at supply zone
-        steps.append({
-            "step": 1,
-            "status": "complete",
-            "title": f"Price reached supply zone at ${key_level:.2f}",
-            "details": f"Current: ${current_price:.2f} (within resistance zone)",
-            "explanation": "This is a RESISTANCE level where sellers historically defended. Institutions often place SELL orders here."
-        })
+        # Step 1: Supply Zone Detected
+        if state == "DETECTED":
+            steps.append({
+                "step": 1,
+                "status": "complete",
+                "title": "🏔️ Supply Zone Detected (H4 Resistance)",
+                "details": f"Resistance at ${key_level:.2f} - Sellers defend this level",
+                "explanation": f"H4 resistance zone tested multiple times. Currently {distance_pips:.1f} pips away. Institutions place SELL orders here."
+            })
 
-        # Step 2: Watching for bearish rejection
-        if state in ["AT_ZONE", "WATCHING", "REJECTION_CONFIRMED"]:
-            upper_wick = rejection_signs.get("upper_wick", 0)
-            is_bearish = rejection_signs.get("is_bearish", False)
+            steps.append({
+                "step": 2,
+                "status": "in_progress",
+                "title": "📍 Price Action",
+                "details": f"Price ${current_price:.2f} is {distance_pips:.1f} pips below resistance",
+                "explanation": "Waiting for price to approach resistance zone (within 10 pips)"
+            })
 
-            if state == "AT_ZONE":
-                steps.append({
-                    "step": 2,
-                    "status": "in_progress",
-                    "title": "⏳ WATCHING for bearish rejection",
-                    "details": f"Looking for sellers to defend ${key_level:.2f} resistance",
-                    "watching_for": {
-                        "upper_wick": {
-                            "status": "✅ Detected" if upper_wick > 3 else "⏳ Waiting",
-                            "text": "Long upper wick (sellers rejecting higher prices)",
-                            "current": f"Upper wick: ${upper_wick:.2f}" if upper_wick > 0 else "No rejection yet"
-                        },
-                        "bearish_candle": {
-                            "status": "✅ Confirmed" if is_bearish else "⏳ Waiting",
-                            "text": "Red/bearish candle (close below open)",
-                            "current": "Bearish candle" if is_bearish else "Not yet bearish"
-                        },
-                        "close_requirement": {
-                            "status": "⏳ Watching",
-                            "text": f"Close BELOW ${key_level - 5:.2f}",
-                            "current": f"Currently: ${current_price:.2f}",
-                            "explanation": "Close below confirms sellers won"
-                        }
-                    },
-                    "explanation": "Upper wick + bearish close = sellers defending resistance"
-                })
-            elif state == "WATCHING":
-                steps.append({
-                    "step": 2,
-                    "status": "in_progress",
-                    "title": "⚠️ Partial rejection detected",
-                    "details": f"1/2 bearish signs confirmed at ${key_level:.2f}",
-                    "confirmations": f"{confirmations}/2 rejection signs",
-                    "explanation": "Getting closer. Need one more confirmation for high-probability SHORT."
-                })
-            else:  # REJECTION_CONFIRMED
-                steps.append({
-                    "step": 2,
-                    "status": "complete",
-                    "title": "✅ Bearish rejection confirmed",
-                    "details": f"Strong selling pressure at ${key_level:.2f}",
-                    "confirmations": f"Upper wick: ${upper_wick:.2f}, Bearish candle: Yes",
-                    "explanation": "Sellers defended resistance! Setup forming."
-                })
+        # Step 2: Approaching
+        elif state == "APPROACHING":
+            steps.append({
+                "step": 1,
+                "status": "complete",
+                "title": "🏔️ Supply Zone Detected (H4 Resistance)",
+                "details": f"Resistance at ${key_level:.2f}",
+                "explanation": "H4 resistance zone where sellers historically defended"
+            })
 
-        # Step 3: Confirmation candle needed
-        if state == "REJECTION_CONFIRMED":
+            steps.append({
+                "step": 2,
+                "status": "in_progress",
+                "title": "📍 Price Approaching",
+                "details": f"Price ${current_price:.2f} is {distance_pips:.1f} pips from resistance",
+                "explanation": "Price getting close to resistance. Prepare for potential rejection."
+            })
+
+        # Step 3: At Zone (Entry Options)
+        elif state == "AT_ZONE":
+            steps.append({
+                "step": 1,
+                "status": "complete",
+                "title": "🏔️ Supply Zone Detected (H4 Resistance)",
+                "details": f"Resistance at ${key_level:.2f}",
+                "explanation": "H4 resistance where sellers historically defended"
+            })
+
+            steps.append({
+                "step": 2,
+                "status": "complete",
+                "title": "✅ Price Reached Resistance",
+                "details": f"Price touched resistance zone (current: ${current_price:.2f}, {distance_pips:.1f} pips from level)",
+                "explanation": "Price at key resistance level. Entry signal is active."
+            })
+
+            # Calculate SL/TP
+            stop_loss = key_level + 5  # 5 pips above resistance
+            risk_pips = abs(current_price - stop_loss) / 0.1
+            reward_pips = risk_pips * 2  # 1:2 minimum R:R
+            take_profit = current_price - (reward_pips * 0.1)
+
+            # Calculate for aggressive entry at resistance level
+            aggressive_risk_pips = abs(key_level - stop_loss) / 0.1
+            aggressive_reward_pips = aggressive_risk_pips * 2
+            aggressive_take_profit = key_level - (aggressive_reward_pips * 0.1)
+
             steps.append({
                 "step": 3,
-                "status": "waiting",
-                "title": "WAITING for confirmation candle",
-                "details": "Next 1H candle must close bearish",
-                "requirements": [
-                    {"text": f"Close BELOW ${key_level - 10:.2f}", "explanation": "Shows downward momentum"},
-                    {"text": "Red/bearish candle", "explanation": "Sellers in control"},
-                    {"text": "No large lower wick", "explanation": "No strong buying pressure"}
-                ],
-                "explanation": "Second bearish candle confirms first wasn't a false signal"
-            })
-
-        # Step 4: Setup building
-        if confirmations >= 2:
-            steps.append({
-                "step": 4,
-                "status": "in_progress",
-                "title": "📉 Setup building momentum",
-                "details": f"Resistance holding at ${key_level:.2f}, price showing weakness",
-                "next": "Wait for 3rd bearish confirmation or enter on momentum",
-                "explanation": "Multiple rejections increase probability of successful SHORT"
-            })
-
-        # Step 5: Entry ready (if all confirmations)
-        if confirmations >= 3:
-            steps.append({
-                "step": 5,
                 "status": "ready",
-                "title": "🎯 READY TO ENTER SHORT",
+                "title": "🎯 READY TO ENTER",
                 "entry_options": [
                     {
-                        "type": "Option A: Enter SHORT now (market order)",
-                        "trigger": f"SELL at current price: ${current_price:.2f}",
-                        "stop_loss": f"${key_level + 10:.2f}",
-                        "take_profit": f"Target support levels below",
-                        "pros": "Catch rejection at resistance",
-                        "cons": "Less confirmation"
+                        "type": "Option A: Enter at resistance level (Aggressive)",
+                        "entry": f"${key_level:.2f}",
+                        "stop_loss": f"${stop_loss:.2f}",
+                        "take_profit": f"${aggressive_take_profit:.2f}",
+                        "risk_pips": f"{aggressive_risk_pips:.1f} pips",
+                        "reward_pips": f"{aggressive_reward_pips:.1f} pips",
+                        "risk_reward": f"1:{aggressive_reward_pips/aggressive_risk_pips:.1f}",
+                        "trigger": f"Enter NOW at ${key_level:.2f}",
+                        "pros": "Best entry price, highest R:R",
+                        "cons": "No confirmation of rejection",
+                        "why_sl": f"SL at ${stop_loss:.2f} - If price closes above resistance, setup invalidated",
+                        "why_tp": f"TP at ${aggressive_take_profit:.2f} - Next support level or 1:2 R:R minimum"
                     },
                     {
-                        "type": "Option B: Wait for breakdown",
-                        "trigger": f"Wait for close BELOW ${key_level - 20:.2f}",
-                        "pros": "More confirmation, clearer direction",
-                        "cons": "Worse entry price"
+                        "type": "Option B: Wait for bearish rejection (Conservative)",
+                        "entry": f"Wait for rejection (est. ${current_price:.2f})",
+                        "stop_loss": f"${stop_loss:.2f}",
+                        "take_profit": f"${take_profit:.2f}",
+                        "risk_pips": f"{risk_pips:.1f} pips (slightly more)",
+                        "reward_pips": f"{reward_pips:.1f} pips (slightly less)",
+                        "risk_reward": f"1:{reward_pips/risk_pips:.1f}",
+                        "trigger": "Wait for 15+ pip bearish rejection from resistance",
+                        "confirmed": strong_rejection,
+                        "pros": "Confirmation of sellers stepping in",
+                        "cons": "Slightly worse entry price",
+                        "why_sl": f"SL at ${stop_loss:.2f} - If price closes above resistance, setup invalidated",
+                        "why_tp": f"TP at ${take_profit:.2f} - Next support level or 1:2 R:R minimum"
                     }
                 ],
-                "recommendation": "Option A for aggressive, Option B for conservative",
-                "explanation": "SUPPLY ZONE setup complete. Sellers defending resistance."
+                "recommendation": "Option A for aggressive (resistance level entry), Option B for conservative (wait for rejection)",
+                "explanation": "Supply Zone activated! Institutions left SELL orders at this resistance. High probability of rejection DOWN."
             })
 
         return steps
