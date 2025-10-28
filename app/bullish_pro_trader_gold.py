@@ -490,7 +490,6 @@ class BullishProTraderGold:
             confluences.append({
                 "type": "LIQUIDITY_GRAB",
                 "score": 4,
-                "details": liquidity_grab,
                 "description": liquidity_grab["description"]
             })
             total_score += 4
@@ -500,7 +499,6 @@ class BullishProTraderGold:
             confluences.append({
                 "type": "FVG",
                 "score": 3,
-                "details": fvg_setup,
                 "description": f"FVG at ${fvg_setup.get('fvg_zone', {}).get('midpoint', 0):.2f}"
             })
             total_score += 3
@@ -510,7 +508,6 @@ class BullishProTraderGold:
             confluences.append({
                 "type": "ORDER_BLOCK",
                 "score": 3,
-                "details": ob_setup,
                 "description": f"Order Block at ${ob_setup.get('ob_zone', {}).get('midpoint', 0):.2f}"
             })
             total_score += 3
@@ -520,7 +517,6 @@ class BullishProTraderGold:
             confluences.append({
                 "type": "BREAKOUT_RETEST",
                 "score": 2,
-                "details": breakout_setup,
                 "description": f"Breakout Retest at ${breakout_setup.get('key_level', 0):.2f}"
             })
             total_score += 2
@@ -530,7 +526,6 @@ class BullishProTraderGold:
             confluences.append({
                 "type": "DEMAND_ZONE",
                 "score": 2,
-                "details": demand_setup,
                 "description": f"Demand Zone at ${demand_setup.get('key_level', 0):.2f}"
             })
             total_score += 2
