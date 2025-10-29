@@ -233,8 +233,22 @@ class BullishProTraderGold:
             if lows.iloc[i] == lows.iloc[i-5:i+5].min():
                 support_candidates.append(float(lows.iloc[i]))
 
-        # Get support levels BELOW current price (potential BUY zones)
-        support = sorted([s for s in support_candidates if s < current_price], reverse=True)[:3] if support_candidates else []
+        # Add psychological levels (round numbers: $3,900, $3,950, $4,000, etc.)
+        # These are important because traders place orders at round numbers
+        psychological_levels = []
+        price_range_start = int((current_price - 100) / 50) * 50  # Start 100 pips below
+        price_range_end = int((current_price + 100) / 50) * 50    # End 100 pips above
+
+        for level in range(price_range_start, price_range_end + 50, 50):
+            # Check if this level is relevant (within 100 pips and below current price)
+            if level < current_price and (current_price - level) <= 100:
+                psychological_levels.append(float(level))
+
+        # Combine swing lows + psychological levels
+        all_support_candidates = support_candidates + psychological_levels
+
+        # Remove duplicates and get support levels BELOW current price (potential BUY zones)
+        support = sorted(list(set([s for s in all_support_candidates if s < current_price])), reverse=True)[:5] if all_support_candidates else []
 
         # BULLISH TRADER: Always prefer support (below price)
         if support:
