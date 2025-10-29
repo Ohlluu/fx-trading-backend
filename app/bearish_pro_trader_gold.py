@@ -487,14 +487,27 @@ class BearishProTraderGold:
         confluences = []
         total_score = 0
 
-        # Add structure score
-        total_score += structure["score"]
+        # Add structure score with VALIDATION
+        # For BEARISH_BOS: Only count if price is still BELOW the BOS level
         if structure["structure_type"] == "BEARISH_BOS":
-            confluences.append({
-                "type": "BEARISH_BOS",
-                "score": 2,
-                "description": structure["description"]
-            })
+            bos_level = structure.get("swing_level", 0)
+            current_candle_close = last_candles['close'].iloc[-1]
+
+            # BOS is INVALID if price closed back above the BOS level
+            bos_invalidated = current_candle_close > bos_level
+
+            if not bos_invalidated:
+                # BOS is still valid - price holding below
+                confluences.append({
+                    "type": "BEARISH_BOS",
+                    "score": 2,
+                    "description": structure["description"]
+                })
+                total_score += structure["score"]
+            # else: BOS invalidated - don't add to confluences
+        else:
+            # Other structure types (CHOCH, etc.)
+            total_score += structure["score"]
 
         # Add liquidity grab (highest priority)
         # STABILITY CHECK: Pattern must be stable for 10 minutes
