@@ -583,12 +583,12 @@ class BullishProTraderGold:
             total_score += 2
 
         # Add Demand Zone
-        # STABILITY CHECK: Pattern must be stable for 10 minutes
-        if demand_setup["detected"] and self._check_pattern_stability("demand_zone", demand_setup, stability_minutes=10):
+        # TEMPORARILY REMOVED STABILITY CHECK TO DEBUG
+        if demand_setup["detected"]:
             confluences.append({
                 "type": "DEMAND_ZONE",
                 "score": 2,
-                "description": f"Demand Zone at ${demand_setup.get('key_level', 0):.2f}"
+                "description": f"Demand Zone at ${demand_setup.get('key_level', 0):.2f} (Strong Rejection: {demand_setup.get('strong_rejection', False)})"
             })
             total_score += 2
 
