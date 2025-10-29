@@ -497,8 +497,8 @@ class BullishProTraderGold:
             })
 
         # Add liquidity grab (highest priority)
-        # STABILITY CHECK: Pattern must be stable for 15 minutes
-        if liquidity_grab["detected"] and self._check_pattern_stability("liquidity_grab", liquidity_grab, stability_minutes=15):
+        # STABILITY CHECK: Pattern must be stable for 10 minutes
+        if liquidity_grab["detected"] and self._check_pattern_stability("liquidity_grab", liquidity_grab, stability_minutes=10):
             confluences.append({
                 "type": "LIQUIDITY_GRAB",
                 "score": 4,
@@ -507,8 +507,8 @@ class BullishProTraderGold:
             total_score += 4
 
         # Add FVG
-        # STABILITY CHECK: Pattern must be stable for 15 minutes
-        if fvg_setup["detected"] and self._check_pattern_stability("fvg", fvg_setup, stability_minutes=15):
+        # STABILITY CHECK: Pattern must be stable for 10 minutes
+        if fvg_setup["detected"] and self._check_pattern_stability("fvg", fvg_setup, stability_minutes=10):
             confluences.append({
                 "type": "FVG",
                 "score": 3,
@@ -530,8 +530,8 @@ class BullishProTraderGold:
             # Allow wicks into the zone, but not full candle closes below it
             ob_violated = current_price < ob_bottom or (current_candle_low < ob_bottom * 0.998)  # 0.2% buffer for wicks
 
-            # STABILITY CHECK: Pattern must be stable for 15 minutes AND not violated
-            if not ob_violated and self._check_pattern_stability("order_block", ob_setup, stability_minutes=15):
+            # STABILITY CHECK: Pattern must be stable for 10 minutes AND not violated
+            if not ob_violated and self._check_pattern_stability("order_block", ob_setup, stability_minutes=10):
                 confluences.append({
                     "type": "ORDER_BLOCK",
                     "score": 3,
@@ -544,8 +544,8 @@ class BullishProTraderGold:
                 pass
 
         # Add Breakout Retest
-        # STABILITY CHECK: Pattern must be stable for 15 minutes
-        if breakout_setup["detected"] and self._check_pattern_stability("breakout_retest", breakout_setup, stability_minutes=15):
+        # STABILITY CHECK: Pattern must be stable for 10 minutes
+        if breakout_setup["detected"] and self._check_pattern_stability("breakout_retest", breakout_setup, stability_minutes=10):
             confluences.append({
                 "type": "BREAKOUT_RETEST",
                 "score": 2,
@@ -554,8 +554,8 @@ class BullishProTraderGold:
             total_score += 2
 
         # Add Demand Zone
-        # STABILITY CHECK: Pattern must be stable for 15 minutes
-        if demand_setup["detected"] and self._check_pattern_stability("demand_zone", demand_setup, stability_minutes=15):
+        # STABILITY CHECK: Pattern must be stable for 10 minutes
+        if demand_setup["detected"] and self._check_pattern_stability("demand_zone", demand_setup, stability_minutes=10):
             confluences.append({
                 "type": "DEMAND_ZONE",
                 "score": 2,
@@ -724,9 +724,9 @@ class BullishProTraderGold:
             "description": "Scanning for professional setups..."
         }
 
-    def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 15) -> bool:
+    def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 10) -> bool:
         """
-        Check if a pattern has been stable for minimum time (default 15 minutes)
+        Check if a pattern has been stable for minimum time (default 10 minutes)
 
         Args:
             pattern_name: Name of pattern (liquidity_grab, fvg, order_block, etc.)
