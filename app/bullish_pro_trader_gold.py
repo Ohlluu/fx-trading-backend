@@ -408,7 +408,8 @@ class BullishProTraderGold:
 
                     pips_below_swing = swing_level - candle['low']
 
-                    if pips_below_swing >= 0.5 and wick_size >= 1.5 and candle['close'] > swing_level:
+                    # Professional thresholds: 5+ pips spike, 8+ pips rejection (institutional moves)
+                    if pips_below_swing >= 5.0 and wick_size >= 8.0 and candle['close'] > swing_level:
                         # Liquidity grab confirmed!
                         return {
                             "detected": True,
@@ -429,7 +430,8 @@ class BullishProTraderGold:
                         wick_size = candle['close'] - candle['low']
                         pips_below = support - candle['low']
 
-                        if pips_below >= 0.5 and wick_size >= 1.5 and candle['close'] > support:
+                        # Professional thresholds: 5+ pips spike, 8+ pips rejection
+                        if pips_below >= 5.0 and wick_size >= 8.0 and candle['close'] > support:
                             return {
                                 "detected": True,
                                 "score": 4,
@@ -1018,9 +1020,9 @@ class BullishProTraderGold:
                 candle_touched_support = True
 
                 # Check for STRONG REJECTION:
-                # If price touched support and bounced 15+ pips from the touch point
+                # If price touched support and bounced 8+ pips from the touch point (professional standard)
                 rejection_distance = current_price - current_candle_low
-                if rejection_distance >= 1.5:  # 15 pips or more
+                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
         # Determine state based on price action
@@ -1137,9 +1139,9 @@ class BullishProTraderGold:
                 candle_touched_fvg = True
 
                 # Check for STRONG REJECTION:
-                # If price touched FVG and bounced 15+ pips from the touch point
+                # If price touched FVG and bounced 8+ pips from the touch point (professional standard)
                 rejection_distance = current_price - current_candle_low
-                if rejection_distance >= 1.5:  # 15 pips or more
+                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
         # Determine state based on proximity and price action
@@ -1340,9 +1342,9 @@ class BullishProTraderGold:
                 candle_touched_ob = True
 
                 # Check for STRONG REJECTION:
-                # If price touched OB and bounced 15+ pips from the touch point
+                # If price touched OB and bounced 8+ pips from the touch point (professional standard)
                 rejection_distance = current_price - current_candle_low
-                if rejection_distance >= 1.5:  # 15 pips or more
+                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
         # Determine state based on proximity and M5 data

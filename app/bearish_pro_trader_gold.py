@@ -408,7 +408,8 @@ class BearishProTraderGold:
 
                     pips_above_swing = candle['high'] - swing_level
 
-                    if pips_above_swing >= 0.5 and wick_size >= 1.5 and candle['close'] < swing_level:
+                    # Professional thresholds: 5+ pips spike, 8+ pips rejection (institutional moves)
+                    if pips_above_swing >= 5.0 and wick_size >= 8.0 and candle['close'] < swing_level:
                         # Liquidity grab confirmed!
                         return {
                             "detected": True,
@@ -429,7 +430,8 @@ class BearishProTraderGold:
                         wick_size = candle['high'] - candle['close']
                         pips_above = candle['high'] - resistance
 
-                        if pips_above >= 0.5 and wick_size >= 1.5 and candle['close'] < resistance:
+                        # Professional thresholds: 5+ pips spike, 8+ pips rejection
+                        if pips_above >= 5.0 and wick_size >= 8.0 and candle['close'] < resistance:
                             return {
                                 "detected": True,
                                 "score": 4,
@@ -1068,7 +1070,7 @@ class BearishProTraderGold:
                 # Check for STRONG REJECTION:
                 # If price touched FVG and dropped 15+ pips from the touch point
                 rejection_distance = current_candle_high - current_price
-                if rejection_distance >= 1.5:  # 15 pips or more
+                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
         # Determine state based on proximity and price action
@@ -1214,7 +1216,7 @@ class BearishProTraderGold:
                 # Check for STRONG REJECTION:
                 # If price touched OB and dropped 15+ pips from the touch point
                 rejection_distance = current_candle_high - current_price
-                if rejection_distance >= 1.5:  # 15 pips or more
+                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
         # Determine state based on proximity
@@ -1329,7 +1331,7 @@ class BearishProTraderGold:
                 # Check for STRONG REJECTION:
                 # If price touched resistance and dropped 15+ pips from the touch point
                 rejection_distance = current_candle_high - current_price
-                if rejection_distance >= 1.5:  # 15 pips or more
+                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
         # Determine state based on price action
