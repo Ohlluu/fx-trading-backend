@@ -526,8 +526,8 @@ class BullishProTraderGold:
             total_score += structure["score"]
 
         # Add liquidity grab (highest priority)
-        # STABILITY CHECK: Pattern must be stable for 10 minutes
-        if liquidity_grab["detected"] and self._check_pattern_stability("liquidity_grab", liquidity_grab, stability_minutes=10):
+        # NO stability check needed - based on completed historical candles
+        if liquidity_grab["detected"]:
             confluences.append({
                 "type": "LIQUIDITY_GRAB",
                 "score": 4,
