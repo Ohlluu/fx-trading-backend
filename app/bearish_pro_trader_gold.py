@@ -2249,54 +2249,124 @@ class BearishProTraderGold:
         }
 
     def _build_trade_plan(self, setup: Dict, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
-        """Build complete trade plan"""
-        state = setup.get("state", "SCANNING")
+        """Build complete trade plan with entry, SL, TP based on confluence patterns"""
+        total_score = setup.get("total_score", 0)
 
-        if state not in ["CONFIRMATION_WAITING", "READY_TO_ENTER"]:
+        # Only provide trade plan if we have sufficient confluence (5+ points)
+        if total_score < 5:
             return {
                 "status": "Not ready yet",
-                "message": "Trade plan will appear when setup completes"
+                "message": f"Need 5+ confluence points (currently {total_score}/5)"
             }
 
-        entry = setup["expected_entry"]
-        key_level = setup["key_level"]
+        # Determine entry, SL, TP based on detected confluences
+        confluences = setup.get("confluences", [])
+        key_level = setup.get("key_level", 0)
 
-        # Structure-based SL (below rejection wick)
-        rejection_low = setup.get("rejection_candle_low", entry - 10)
-        sl = rejection_low - 2  # 2 pips buffer
+        # Find key levels from confluences
+        liquidity_grab = next((c for c in confluences if c["type"] == "LIQUIDITY_GRAB"), None)
+        supply_zone = next((c for c in confluences if c["type"] == "SUPPLY_ZONE"), None)
+        order_block = next((c for c in confluences if c["type"] == "ORDER_BLOCK"), None)
 
-        # Find TP levels
+        # ENTRY LOGIC: Based on detected patterns (BEARISH - enter below key level)
+        if liquidity_grab:
+            # Enter on pullback to liquidity grab level
+            entry = key_level - 2  # 2 pips below key level
+            entry_reason = f"Enter 2 pips below ${key_level:.2f} liquidity grab level on pullback"
+        elif supply_zone:
+            # Enter at supply zone
+            entry = key_level - 2
+            entry_reason = f"Enter 2 pips below ${key_level:.2f} supply zone"
+        else:
+            # Default: enter at key level
+            entry = current_price if current_price < key_level else key_level - 2
+            entry_reason = f"Enter at current price ${current_price:.2f}"
+
+        # STOP LOSS: Above the highest wick/key level with buffer (BEARISH)
         resistance_levels = h4_levels.get("resistance_levels", [])
-        tp1 = entry + 15 if not resistance_levels else min([r for r in resistance_levels if r > entry], default=entry + 15)
-        tp2 = entry + 30 if not resistance_levels else max([r for r in resistance_levels if r > entry], default=entry + 30)
 
-        risk_pips = entry - sl
-        reward1_pips = tp1 - entry
-        reward2_pips = tp2 - entry
+        if liquidity_grab:
+            # SL above the liquidity grab high (stops already swept)
+            sl = key_level + 5  # 5 pips above key level where stops were grabbed
+            sl_reason = f"Above liquidity grab level (${key_level:.2f}) - stops already swept"
+        elif supply_zone and resistance_levels:
+            # SL above supply zone
+            sl = key_level + 10
+            sl_reason = f"Above supply zone (${key_level:.2f}) with buffer"
+        else:
+            # Default: 15 pips above entry
+            sl = entry + 15
+            sl_reason = "Standard 15 pip stop"
+
+        # TAKE PROFIT: Find support levels (BEARISH - targets below)
+        support_levels = h4_levels.get("support_levels", [])
+        nearby_support = [s for s in support_levels if s < entry and s > entry - 50]
+
+        if len(nearby_support) >= 2:
+            # Use actual support levels
+            tp1 = nearby_support[0]
+            tp2 = nearby_support[1]
+            tp1_reason = f"H4 support at ${tp1:.2f}"
+            tp2_reason = f"Major H4 support at ${tp2:.2f}"
+        elif len(nearby_support) == 1:
+            # One support level found
+            tp1 = nearby_support[0]
+            tp2 = tp1 - 15
+            tp1_reason = f"H4 support at ${tp1:.2f}"
+            tp2_reason = f"Extension below support (${tp2:.2f})"
+        else:
+            # No support found, use fixed targets
+            tp1 = entry - 15
+            tp2 = entry - 30
+            tp1_reason = f"Standard target -15 pips (${tp1:.2f})"
+            tp2_reason = f"Extended target -30 pips (${tp2:.2f})"
+
+        # Calculate R:R ratios
+        risk_pips = sl - entry
+        reward1_pips = entry - tp1
+        reward2_pips = entry - tp2
+        rr1 = reward1_pips / risk_pips if risk_pips > 0 else 0
+        rr2 = reward2_pips / risk_pips if risk_pips > 0 else 0
+
+        # Build confluence reasoning
+        confluence_reasons = []
+        for c in confluences:
+            confluence_reasons.append(f"• {c['type'].replace('_', ' ').title()}: {c['score']} points")
 
         return {
             "status": "Ready",
-            "entry_method": "Market order when step 5 triggers",
+            "entry_method": "Limit order" if entry > current_price else "Market order",
             "entry_price": f"${entry:.2f}",
+            "entry_reasoning": entry_reason,
             "stop_loss": {
                 "price": f"${sl:.2f}",
-                "reason": f"Below rejection wick low (${rejection_low:.2f})",
+                "reason": sl_reason,
                 "pips": f"{risk_pips:.1f} pips risk",
-                "why": "If price goes here, support failed and setup is invalid"
+                "why": "If price goes here, setup invalidated - liquidity already grabbed, further upside means failure"
             },
             "take_profit_1": {
                 "price": f"${tp1:.2f}",
-                "reason": "Next resistance level",
-                "rr_ratio": f"{reward1_pips/risk_pips:.1f}:1",
-                "action": "Close 50%, move SL to entry",
-                "why": "Lock in profit, run rest risk-free"
+                "reason": tp1_reason,
+                "pips": f"-{reward1_pips:.1f} pips",
+                "rr_ratio": f"{rr1:.2f}:1",
+                "action": "Close 50%, move SL to breakeven",
+                "why": "Lock in profit, secure risk-free trade"
             },
             "take_profit_2": {
                 "price": f"${tp2:.2f}",
-                "reason": "Major resistance level",
-                "rr_ratio": f"{reward2_pips/risk_pips:.1f}:1",
+                "reason": tp2_reason,
+                "pips": f"-{reward2_pips:.1f} pips",
+                "rr_ratio": f"{rr2:.2f}:1",
                 "action": "Close remaining 50%",
-                "why": "Full profit at high-probability target"
+                "why": "Full profit target reached"
+            },
+            "confluence_summary": {
+                "total_points": total_score,
+                "reasons": confluence_reasons,
+                "why_trade": f"High-probability setup with {total_score}/5 confluence points. " +
+                            ("Liquidity already grabbed above, stops swept. " if liquidity_grab else "") +
+                            ("Strong supply zone holding. " if supply_zone else "") +
+                            ("Institutional selling visible. " if order_block else "")
             },
             "position_sizing": {
                 "account_risk": "0.5% recommended",
