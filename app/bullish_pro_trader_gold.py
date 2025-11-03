@@ -423,9 +423,9 @@ class BullishProTraderGold:
 
         return {"structure_type": "NEUTRAL", "score": 0, "swing_level": None}
 
-    def _check_liquidity_grab(self, candles: pd.DataFrame, current_price: float, h4_levels: Dict) -> Dict[str, Any]:
+    def _check_liquidity_grab(self, candles: pd.DataFrame, current_price: float, h4_levels: Dict, current_candle_low: float = None) -> Dict[str, Any]:
         """
-        Check for Liquidity Grab / Stop Hunt pattern
+        Check for Liquidity Grab / Stop Hunt pattern (REAL-TIME DETECTION)
 
         Liquidity Grab = Price spikes beyond key level to trigger stops, then reverses sharply
         - Very high probability setup when combined with OB/FVG
@@ -437,9 +437,15 @@ class BullishProTraderGold:
         - Immediate rejection back above the level
         - Entry on the reversal
 
+        Args:
+            candles: Historical H1 candles
+            current_price: Current market price
+            h4_levels: H4 support/resistance levels
+            current_candle_low: Low of the CURRENT forming candle (real-time detection)
+
         Returns:
             - detected: True if liquidity grab confirmed
-            - score: +4 points (highest priority)
+            - score: +5 points (current candle), +4 points (last closed), +3 points (2 candles ago)
             - grab_level: The level where stops were grabbed
             - grab_low: Lowest point of the grab
         """
@@ -462,7 +468,54 @@ class BullishProTraderGold:
         if not swing_lows:
             return {"detected": False, "score": 0}
 
-        # Check last 2 candles for liquidity grab pattern (tighter recency filter)
+        # PRIORITY 1: Check CURRENT forming candle for liquidity grab (REAL-TIME)
+        # Professional traders see this happening NOW and enter immediately
+        if current_candle_low is not None:
+            for swing_low in swing_lows:
+                swing_level = swing_low["level"]
+
+                # Check if current candle spiked below swing low
+                if current_candle_low < swing_level:
+                    # Measure current wick size
+                    wick_size = current_price - current_candle_low
+                    pips_below_swing = swing_level - current_candle_low
+
+                    # Liquidity grab requirements (real-time):
+                    # 1. Wick extends 5+ pips below swing level
+                    # 2. Strong rejection (wick 8+ pips)
+                    # 3. Price currently back above swing level
+                    if pips_below_swing >= 5.0 and wick_size >= 8.0 and current_price > swing_level:
+                        # HIGHEST SCORE (5 points) - happening RIGHT NOW!
+                        return {
+                            "detected": True,
+                            "score": 5,
+                            "grab_level": swing_level,
+                            "grab_low": current_candle_low,
+                            "rejection_size": round(wick_size, 1),
+                            "pips_below": round(pips_below_swing, 1),
+                            "description": f"🔥 LIVE Liquidity Grab at ${swing_level:.2f}! Price spiking to ${current_candle_low:.2f} ({pips_below_swing:.1f} pips below) rejecting {wick_size:.1f} pips UP NOW!"
+                        }
+
+            # Also check H4 support levels for current candle grabs
+            support_levels = h4_levels.get("support_levels", [])
+            for support in support_levels:
+                if abs(support - current_price) < 30:
+                    if current_candle_low < support:
+                        wick_size = current_price - current_candle_low
+                        pips_below = support - current_candle_low
+
+                        if pips_below >= 5.0 and wick_size >= 8.0 and current_price > support:
+                            return {
+                                "detected": True,
+                                "score": 5,
+                                "grab_level": support,
+                                "grab_low": current_candle_low,
+                                "rejection_size": round(wick_size, 1),
+                                "pips_below": round(pips_below, 1),
+                                "description": f"🔥 LIVE Liquidity Grab at H4 support ${support:.2f}! Price spiking to ${current_candle_low:.2f} rejecting {wick_size:.1f} pips UP NOW!"
+                            }
+
+        # PRIORITY 2: Check last 2 CLOSED candles for liquidity grab pattern
         # Score based on recency: 4 points if last candle, 3 points if 2 candles ago
         last_2 = recent_candles.tail(2)
 
@@ -566,7 +619,7 @@ class BullishProTraderGold:
         ob_setup = await self._check_order_block(last_candles, current_price, current_candle_low)
         breakout_setup = self._check_breakout_retest(last_candles, key_level, current_price, current_candle_low)
         demand_setup = self._check_demand_zone(last_candles, h4_levels, current_price, current_candle_low)
-        liquidity_grab = self._check_liquidity_grab(last_candles, current_price, h4_levels)
+        liquidity_grab = self._check_liquidity_grab(last_candles, current_price, h4_levels, current_candle_low)
 
         # STEP 3: Calculate confluence score
         confluences = []
