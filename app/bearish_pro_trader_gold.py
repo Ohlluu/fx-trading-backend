@@ -42,6 +42,10 @@ class BearishProTraderGold:
             "entry_state_since": None  # When current state started
         }
 
+        # ACTIVE TRADE TRACKER: Lock in setup when 5+ confluence triggers
+        # Once a trade is active, stop re-validating confluences and just monitor TP/SL
+        self.active_trade = None  # {"setup": {...}, "trade_plan": {...}, "triggered_at": timestamp, "entry": price}
+
     async def get_detailed_setup(self) -> Dict[str, Any]:
         """
         Main function: Returns complete setup analysis with educational breakdown
@@ -60,10 +64,42 @@ class BearishProTraderGold:
             if current_price is None:
                 current_price = float(h1_data['close'].iloc[-1])
 
+            # CHECK IF ACTIVE TRADE EXISTS FIRST
+            # If we have an active trade, monitor it instead of re-scanning
+            if self.active_trade is not None:
+                trade_status = self._monitor_active_trade(current_price)
+
+                # If trade is still active, return trade monitoring data
+                if trade_status["is_active"]:
+                    # Get context for display (but don't re-validate confluence)
+                    daily_analysis = self._analyze_daily_trend(d1_data, current_price)
+                    h4_levels = self._identify_key_levels_h4(h4_data, current_price)
+                    current_candle = await self._get_current_candle_info(h1_data, current_price)
+
+                    return trade_status["response"]
+                else:
+                    # Trade finished (TP or SL hit), clear it and resume scanning
+                    self.active_trade = None
+
             # Analyze market structure across timeframes (using REAL data)
             daily_analysis = self._analyze_daily_trend(d1_data, current_price)
             h4_levels = self._identify_key_levels_h4(h4_data, current_price)
             h1_setup = await self._detect_setup_pattern(h1_data, h4_levels, current_price)
+
+            # CHECK IF SETUP TRIGGERED (5+ confluence)
+            # If yes, lock it in as active trade
+            if h1_setup.get("total_score", 0) >= 5:
+                trade_plan = self._build_trade_plan(h1_setup, h4_levels, current_price)
+                if trade_plan.get("status") == "Ready":
+                    # Save as active trade
+                    self.active_trade = {
+                        "setup": h1_setup,
+                        "trade_plan": trade_plan,
+                        "triggered_at": datetime.now(pytz.UTC),
+                        "entry": float(trade_plan["entry_price"].replace("$", "").replace(",", "")),
+                        "h4_levels": h4_levels,
+                        "daily_analysis": daily_analysis
+                    }
 
             # Get current candle details
             current_candle = await self._get_current_candle_info(h1_data, current_price)
@@ -2491,6 +2527,215 @@ class BearishProTraderGold:
                 "calculation": f"Position size = (Account × 0.005) / {risk_pips:.1f} pips"
             }
         }
+
+    def _monitor_active_trade(self, current_price: float) -> Dict[str, Any]:
+        """
+        Monitor an active SHORT trade's progress toward TP/SL
+        Don't re-validate confluences - just track price vs targets
+        """
+        if self.active_trade is None:
+            return {"is_active": False}
+
+        trade_plan = self.active_trade["trade_plan"]
+        setup = self.active_trade["setup"]
+        entry = self.active_trade["entry"]
+        h4_levels = self.active_trade.get("h4_levels", {})
+        daily_analysis = self.active_trade.get("daily_analysis", {})
+
+        # Extract TP and SL levels
+        tp1_str = trade_plan.get("take_profit_1", {}).get("price", "$0")
+        tp2_str = trade_plan.get("take_profit_2", {}).get("price", "$0")
+        sl_str = trade_plan.get("stop_loss", {}).get("price", "$0")
+
+        tp1 = float(tp1_str.replace("$", "").replace(",", ""))
+        tp2 = float(tp2_str.replace("$", "").replace(",", ""))
+        sl = float(sl_str.replace("$", "").replace(",", ""))
+
+        # Check if TP or SL hit (SHORT: TP is below entry, SL is above)
+        trade_result = None
+        if current_price <= tp2:
+            trade_result = "TP2_HIT"
+        elif current_price <= tp1:
+            trade_result = "TP1_HIT"
+        elif current_price >= sl:
+            trade_result = "SL_HIT"
+
+        # Calculate current P&L (SHORT: profit when price goes down)
+        pnl_pips = entry - current_price
+        pnl_percent = (pnl_pips / entry) * 100 if entry > 0 else 0
+
+        # Build trade progress status
+        if trade_result == "SL_HIT":
+            status = "TRADE_STOPPED_OUT"
+            status_message = f"❌ Stop Loss Hit at ${sl:.2f}"
+            is_active = False  # Trade finished
+        elif trade_result == "TP2_HIT":
+            status = "TRADE_COMPLETED"
+            status_message = f"✅ TP2 Hit! Full profit taken at ${tp2:.2f}"
+            is_active = False  # Trade finished
+        elif trade_result == "TP1_HIT":
+            status = "TRADE_ACTIVE_TP1_HIT"
+            status_message = f"✅ TP1 Hit! Waiting for TP2 at ${tp2:.2f}"
+            is_active = True  # Still watching for TP2
+        else:
+            # Trade still active, no TP/SL hit yet
+            status = "TRADE_ACTIVE"
+
+            # Show progress based on price location
+            distance_to_tp1 = current_price - tp1  # SHORT: distance is current - tp1
+            distance_to_sl = sl - current_price
+
+            if pnl_pips >= 0:
+                if distance_to_tp1 <= 5:
+                    status_message = f"🎯 Approaching TP1 (${tp1:.2f}) - {distance_to_tp1:.1f} pips away"
+                else:
+                    status_message = f"📈 In Profit +{pnl_pips:.1f} pips | Target: TP1 ${tp1:.2f}"
+            else:
+                if abs(pnl_pips) <= 3:
+                    status_message = f"⏸️ At Entry ${entry:.2f} ({pnl_pips:+.1f} pips)"
+                else:
+                    status_message = f"📉 Pullback {pnl_pips:.1f} pips | SL: ${sl:.2f} ({distance_to_sl:.1f} pips away)"
+
+            is_active = True
+
+        # Build response with locked-in trade data
+        response = {
+            "status": "success",
+            "pair": self.pair,
+            "current_price": current_price,
+            "setup_status": status,
+            "setup_progress": "MONITORING",
+            "pattern_type": "ACTIVE_TRADE",
+
+            # Keep original confluence data (locked in)
+            "confluences": setup.get("confluences", []),
+            "total_score": setup.get("total_score", 0),
+            "confidence": setup.get("confidence", None),
+            "structure": setup.get("structure", {"structure_type": "NEUTRAL", "score": 0}),
+
+            # Trade monitoring steps
+            "setup_steps": self._build_active_trade_steps(current_price, entry, tp1, tp2, sl, pnl_pips, trade_result),
+
+            # Context (doesn't change)
+            "why_this_setup": {
+                "daily": daily_analysis,
+                "h4": self._explain_h4_structure(h4_levels, current_price),
+                "h1": {
+                    "pattern": "ACTIVE_TRADE",
+                    "points": [
+                        f"Trade Status: {status}",
+                        f"Entry: ${entry:.2f}",
+                        f"Current P&L: {pnl_pips:+.1f} pips ({pnl_percent:+.2f}%)",
+                        status_message
+                    ]
+                },
+                "session": self._explain_session_context()
+            },
+
+            # Show current candle (for context)
+            "live_candle": {
+                "timeframe": "1H",
+                "current": current_price,
+                "entry": entry,
+                "pnl_pips": round(pnl_pips, 1),
+                "pnl_percent": round(pnl_percent, 2)
+            },
+
+            # Trade plan (locked in)
+            "trade_plan": trade_plan,
+
+            # Invalidation = SL level
+            "invalidation": [
+                {
+                    "condition": f"Stop Loss at ${sl:.2f}",
+                    "reason": f"Trade invalidated if price hits ${sl:.2f}",
+                    "action": f"Exit trade - {abs(entry - sl):.1f} pip loss",
+                    "severity": "CRITICAL"
+                }
+            ],
+
+            # Chart data would need to be fetched separately if needed
+            "chart_data": {
+                "h1_candles": [],  # Skip for now
+                "key_levels": h4_levels,
+                "current_price": current_price
+            },
+
+            "last_update": datetime.now(pytz.UTC).isoformat()
+        }
+
+        return {"is_active": is_active, "response": response}
+
+    def _build_active_trade_steps(self, current_price: float, entry: float, tp1: float, tp2: float, sl: float, pnl_pips: float, trade_result: str) -> List[Dict[str, Any]]:
+        """Build steps display for active SHORT trade monitoring"""
+        steps = []
+
+        # Step 1: Entry confirmation
+        steps.append({
+            "step": 1,
+            "status": "complete",
+            "title": f"✅ Entered SHORT at ${entry:.2f}",
+            "details": f"Trade active with {abs(entry - sl):.1f} pip stop loss",
+            "explanation": "Position opened based on 5+ confluence points"
+        })
+
+        # Step 2: TP1 status (SHORT: TP is below entry)
+        distance_to_tp1 = current_price - tp1  # For SHORT positions
+        if trade_result == "TP2_HIT" or trade_result == "TP1_HIT":
+            tp1_status = "complete"
+            tp1_title = f"✅ TP1 Hit at ${tp1:.2f}"
+        elif distance_to_tp1 <= 5:
+            tp1_status = "in_progress"
+            tp1_title = f"🎯 Approaching TP1 - {distance_to_tp1:.1f} pips away"
+        else:
+            tp1_status = "pending"
+            tp1_title = f"⏳ Target TP1 at ${tp1:.2f} ({distance_to_tp1:.1f} pips)"
+
+        steps.append({
+            "step": 2,
+            "status": tp1_status,
+            "title": tp1_title,
+            "details": f"Close 50% position, move SL to breakeven",
+            "explanation": "Lock in profit and make trade risk-free"
+        })
+
+        # Step 3: TP2 status
+        distance_to_tp2 = current_price - tp2  # For SHORT positions
+        if trade_result == "TP2_HIT":
+            tp2_status = "complete"
+            tp2_title = f"✅ TP2 Hit at ${tp2:.2f} - Trade Complete!"
+        elif trade_result == "TP1_HIT":
+            tp2_status = "in_progress"
+            tp2_title = f"🎯 Targeting TP2 at ${tp2:.2f} ({distance_to_tp2:.1f} pips)"
+        else:
+            tp2_status = "pending"
+            tp2_title = f"⏳ Final Target TP2 at ${tp2:.2f} ({distance_to_tp2:.1f} pips)"
+
+        steps.append({
+            "step": 3,
+            "status": tp2_status,
+            "title": tp2_title,
+            "details": f"Close remaining 50% position",
+            "explanation": "Full profit target - trade complete"
+        })
+
+        # Step 4: Current P&L
+        if pnl_pips >= 0:
+            pnl_emoji = "📈"
+            pnl_status = "complete"
+        else:
+            pnl_emoji = "📉"
+            pnl_status = "pending"
+
+        steps.append({
+            "step": 4,
+            "status": pnl_status,
+            "title": f"{pnl_emoji} Current P&L: {pnl_pips:+.1f} pips",
+            "details": f"Price: ${current_price:.2f} | Entry: ${entry:.2f}",
+            "explanation": "Live profit/loss tracking"
+        })
+
+        return steps
 
     def _get_invalidation_conditions(self, setup: Dict) -> List[Dict[str, Any]]:
         """
