@@ -947,12 +947,12 @@ class BullishProTraderGold:
                 if candle['close'] < key_level - 5:  # 5 pips buffer
                     return {"detected": False}  # Setup invalidated
 
-        # INVALIDATION CHECK: Time-based expiration (6+ candles without retest)
-        if len(candles_after_breakout) >= 6:
+        # INVALIDATION CHECK: Time-based expiration (4+ candles without retest)
+        if len(candles_after_breakout) >= 4:
             return {"detected": False}  # Setup expired - took too long
 
-        # INVALIDATION CHECK: Price ran away without retest (30+ pips above breakout level)
-        if current_price > key_level + 30:
+        # INVALIDATION CHECK: Price ran away without retest (20+ pips above breakout level)
+        if current_price > key_level + 20:
             return {"detected": False}  # Setup ran away - retest opportunity expired
 
         # Check if price has come back DOWN to test the level
@@ -2394,12 +2394,12 @@ class BullishProTraderGold:
             })
 
         elif state == "RETEST_WAITING":
-            # Calculate dynamic distance threshold (30 pips for XAUUSD)
-            runaway_threshold = key_level + 30
+            # Calculate dynamic distance threshold (20 pips for XAUUSD)
+            runaway_threshold = key_level + 20
 
             conditions.append({
                 "condition": f"Price moves above ${runaway_threshold:.2f} without pullback",
-                "reason": "Setup ran away - retest opportunity expired (30+ pips above breakout)",
+                "reason": "Setup ran away - strong momentum without retest (20+ pips above breakout)",
                 "action": "Cancel setup. Look for new entry or pattern.",
                 "severity": "HIGH"
             })
@@ -2410,7 +2410,7 @@ class BullishProTraderGold:
                 "severity": "CRITICAL"
             })
             conditions.append({
-                "condition": "6+ hours passed without retest",
+                "condition": "4+ hours passed without retest",
                 "reason": "Setup expired - retest took too long",
                 "action": "Move on to new patterns. Opportunity missed.",
                 "severity": "MEDIUM"
