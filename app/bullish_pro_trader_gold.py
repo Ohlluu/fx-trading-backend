@@ -224,31 +224,44 @@ class BullishProTraderGold:
         highs = recent_data['high']
         lows = recent_data['low']
 
-        # Find significant support levels ONLY (bullish trader looks for BUY opportunities)
+        # Find significant support AND resistance levels
         support_candidates = []
+        resistance_candidates = []
 
-        # Find local lows using 4H candles
+        # Find local lows (support) and local highs (resistance) using 4H candles
         for i in range(5, len(lows) - 5):
             # Support: local low
             if lows.iloc[i] == lows.iloc[i-5:i+5].min():
                 support_candidates.append(float(lows.iloc[i]))
 
+            # Resistance: local high
+            if highs.iloc[i] == highs.iloc[i-5:i+5].max():
+                resistance_candidates.append(float(highs.iloc[i]))
+
         # Add psychological levels (round numbers: $3,900, $3,950, $4,000, etc.)
         # These are important because traders place orders at round numbers
-        psychological_levels = []
+        psychological_levels_support = []
+        psychological_levels_resistance = []
         price_range_start = int((current_price - 100) / 50) * 50  # Start 100 pips below
         price_range_end = int((current_price + 100) / 50) * 50    # End 100 pips above
 
         for level in range(price_range_start, price_range_end + 50, 50):
-            # Check if this level is relevant (within 100 pips and below current price)
+            # Support: below current price
             if level < current_price and (current_price - level) <= 100:
-                psychological_levels.append(float(level))
+                psychological_levels_support.append(float(level))
+            # Resistance: above current price
+            elif level > current_price and (level - current_price) <= 100:
+                psychological_levels_resistance.append(float(level))
 
-        # Combine swing lows + psychological levels
-        all_support_candidates = support_candidates + psychological_levels
+        # Combine swing levels + psychological levels
+        all_support_candidates = support_candidates + psychological_levels_support
+        all_resistance_candidates = resistance_candidates + psychological_levels_resistance
 
         # Remove duplicates and get support levels BELOW current price (potential BUY zones)
         support = sorted(list(set([s for s in all_support_candidates if s < current_price])), reverse=True)[:5] if all_support_candidates else []
+
+        # Remove duplicates and get resistance levels ABOVE current price (potential TP zones)
+        resistance = sorted(list(set([r for r in all_resistance_candidates if r > current_price])))[:5] if all_resistance_candidates else []
 
         # BULLISH TRADER: Always prefer support (below price)
         if support:
@@ -276,7 +289,7 @@ class BullishProTraderGold:
         return {
             "key_level": key_level,
             "level_type": level_type,
-            "resistance_levels": [],  # Bullish trader doesn't track resistance
+            "resistance_levels": resistance,  # FIX: Track resistance for TP targets
             "support_levels": support if support else [key_level],
             "distance_pips": round(distance_pips, 1),
             "last_updated": last_updated_str,
@@ -678,6 +691,7 @@ class BullishProTraderGold:
                     "pattern_type": "CONFLUENCE_DETECTED",
                     "state": "WAITING_CONFIRMATION",
                     "progress": "3/5",
+                    "key_level": key_level,  # FIX: Add key_level so trade plan can use it
                     "confluences": confluences,
                     "total_score": total_score,
                     "adjusted_score": adjusted_score,
@@ -2165,11 +2179,22 @@ class BullishProTraderGold:
         demand_zone = next((c for c in confluences if c["type"] == "DEMAND_ZONE"), None)
         order_block = next((c for c in confluences if c["type"] == "ORDER_BLOCK"), None)
 
-        # ENTRY LOGIC: Based on detected patterns
+        # Extract liquidity grab level from description if present
+        liquidity_grab_level = None
         if liquidity_grab:
-            # Enter on pullback to liquidity grab level (safer entry after spike)
-            entry = key_level + 2  # 2 pips above key level
-            entry_reason = f"Enter 2 pips above ${key_level:.2f} liquidity grab level on pullback"
+            # Parse "Liquidity Grab at H4 support $4000.00!" or similar
+            import re
+            match = re.search(r'\$(\d+(?:\.\d+)?)', liquidity_grab.get("description", ""))
+            if match:
+                liquidity_grab_level = float(match.group(1))
+
+        # ENTRY LOGIC: Professional methodology
+        # Entry is at H4 support (key_level) or order block/FVG zone
+        # NOT at the liquidity grab level itself
+        if liquidity_grab or order_block:
+            # Enter at H4 support/order block (where institutions will buy)
+            entry = key_level + 2  # 2 pips above H4 support
+            entry_reason = f"Enter 2 pips above H4 support ${key_level:.2f} (order block/liquidity grab confirmed)"
         elif demand_zone:
             # Enter at demand zone
             entry = key_level + 2
@@ -2179,13 +2204,15 @@ class BullishProTraderGold:
             entry = current_price if current_price > key_level else key_level + 2
             entry_reason = f"Enter at current price ${current_price:.2f}"
 
-        # STOP LOSS: Below the lowest wick/key level with buffer
+        # STOP LOSS: Professional methodology
+        # SL goes below the liquidity grab level (where stops were swept)
+        # This validates the setup failed if price returns to grab level
         support_levels = h4_levels.get("support_levels", [])
 
-        if liquidity_grab:
+        if liquidity_grab and liquidity_grab_level:
             # SL below the liquidity grab low (stops already swept)
-            sl = key_level - 5  # 5 pips below key level where stops were grabbed
-            sl_reason = f"Below liquidity grab level (${key_level:.2f}) - stops already swept"
+            sl = liquidity_grab_level - 5  # 5 pips below liquidity grab level
+            sl_reason = f"Below liquidity grab level (${liquidity_grab_level:.2f}) - stops already swept"
         elif demand_zone and support_levels:
             # SL below demand zone
             sl = key_level - 10
@@ -2195,28 +2222,40 @@ class BullishProTraderGold:
             sl = entry - 15
             sl_reason = "Standard 15 pip stop"
 
-        # TAKE PROFIT: Find resistance levels
+        # TAKE PROFIT: Professional methodology - target opposing liquidity pools
+        # Look for resistance levels (swing highs, psychological levels) above entry
         resistance_levels = h4_levels.get("resistance_levels", [])
-        nearby_resistance = [r for r in resistance_levels if r > entry and r < entry + 50]
 
-        if len(nearby_resistance) >= 2:
-            # Use actual resistance levels
-            tp1 = nearby_resistance[0]
-            tp2 = nearby_resistance[1]
-            tp1_reason = f"H4 resistance at ${tp1:.2f}"
+        # Calculate minimum TP based on R:R ratios (aim for 2:1 and 3:1)
+        risk_pips = entry - sl
+        min_tp1_distance = risk_pips * 2  # 2:1 R:R minimum
+        min_tp2_distance = risk_pips * 3  # 3:1 R:R minimum
+
+        # Find resistance within reasonable range (100 pips)
+        nearby_resistance = [r for r in resistance_levels if r > entry and r < entry + 100]
+
+        # Filter resistance that meets minimum R:R requirements
+        valid_tp1_levels = [r for r in nearby_resistance if (r - entry) >= min_tp1_distance]
+        valid_tp2_levels = [r for r in nearby_resistance if (r - entry) >= min_tp2_distance]
+
+        if len(valid_tp1_levels) >= 1 and len(valid_tp2_levels) >= 1:
+            # Use structure-based resistance levels
+            tp1 = valid_tp1_levels[0]  # First resistance meeting 2:1 R:R
+            tp2 = valid_tp2_levels[0] if valid_tp2_levels[0] != tp1 else (valid_tp2_levels[1] if len(valid_tp2_levels) > 1 else tp1 + 15)
+            tp1_reason = f"H4 resistance/liquidity pool at ${tp1:.2f}"
             tp2_reason = f"Major H4 resistance at ${tp2:.2f}"
-        elif len(nearby_resistance) == 1:
-            # One resistance level found
-            tp1 = nearby_resistance[0]
-            tp2 = tp1 + 15
+        elif len(valid_tp1_levels) >= 1:
+            # One valid resistance found
+            tp1 = valid_tp1_levels[0]
+            tp2 = entry + min_tp2_distance  # Use R:R based target for TP2
             tp1_reason = f"H4 resistance at ${tp1:.2f}"
-            tp2_reason = f"Extension above resistance (${tp2:.2f})"
+            tp2_reason = f"Extended target (3:1 R:R) at ${tp2:.2f}"
         else:
-            # No resistance found, use fixed targets
-            tp1 = entry + 15
-            tp2 = entry + 30
-            tp1_reason = f"Standard target +15 pips (${tp1:.2f})"
-            tp2_reason = f"Extended target +30 pips (${tp2:.2f})"
+            # No structure found - use R:R based targets (2:1 and 3:1 minimum)
+            tp1 = entry + min_tp1_distance
+            tp2 = entry + min_tp2_distance
+            tp1_reason = f"Target (2:1 R:R) at ${tp1:.2f}"
+            tp2_reason = f"Extended target (3:1 R:R) at ${tp2:.2f}"
 
         # Calculate R:R ratios
         risk_pips = entry - sl
