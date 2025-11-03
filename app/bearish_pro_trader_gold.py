@@ -607,8 +607,8 @@ class BearishProTraderGold:
             total_score += liquidity_grab["score"]
 
         # Add FVG
-        # STABILITY CHECK: Pattern must be stable for 10 minutes
-        if fvg_setup["detected"] and self._check_pattern_stability("fvg", fvg_setup, stability_minutes=10):
+        # Pattern shows immediately when detected (professional methodology)
+        if fvg_setup["detected"]:
             confluences.append({
                 "type": "FVG",
                 "score": 3,
@@ -618,7 +618,7 @@ class BearishProTraderGold:
 
         # Add Order Block
         if ob_setup["detected"]:
-            # CRITICAL: Validate that OB zone is still holding
+            # CRITICAL: Validate that OB zone is still holding (proper invalidation)
             ob_zone = ob_setup.get('order_block_zone', {})
             ob_bottom = ob_zone.get('bottom', 0)
             ob_top = ob_zone.get('top', 0)
@@ -630,22 +630,19 @@ class BearishProTraderGold:
             # Allow wicks into the zone, but not full candle closes above it
             ob_violated = current_price > ob_top or (current_candle_high > ob_top * 1.002)  # 0.2% buffer for wicks
 
-            # STABILITY CHECK: Pattern must be stable for 10 minutes AND not violated
-            if not ob_violated and self._check_pattern_stability("order_block", ob_setup, stability_minutes=10):
+            # Pattern shows immediately when detected (professional methodology)
+            # Only check if OB is still valid (not violated)
+            if not ob_violated:
                 confluences.append({
                     "type": "ORDER_BLOCK",
                     "score": 3,
                     "description": f"Order Block at ${ob_zone.get('midpoint', 0):.2f} (${ob_bottom:.2f}-${ob_top:.2f})"
                 })
                 total_score += 3
-            else:
-                # OB was violated OR not stable yet - do NOT add to confluence
-                # This prevents false high-score setups when price breaks through OB
-                pass
 
         # Add Breakdown Retest
-        # STABILITY CHECK: Pattern must be stable for 10 minutes
-        if breakdown_setup["detected"] and self._check_pattern_stability("breakout_retest", breakdown_setup, stability_minutes=10):
+        # Pattern shows immediately when detected (professional methodology)
+        if breakdown_setup["detected"]:
             confluences.append({
                 "type": "BREAKDOWN_RETEST",
                 "score": 2,
@@ -654,8 +651,8 @@ class BearishProTraderGold:
             total_score += 2
 
         # Add Supply Zone
-        # STABILITY CHECK: Pattern must be stable for 10 minutes
-        if supply_setup["detected"] and self._check_pattern_stability("supply_zone", supply_setup, stability_minutes=10):
+        # Pattern shows immediately when detected (professional methodology)
+        if supply_setup["detected"]:
             confluences.append({
                 "type": "SUPPLY_ZONE",
                 "score": 2,
