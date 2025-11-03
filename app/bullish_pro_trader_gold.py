@@ -1071,9 +1071,9 @@ class BullishProTraderGold:
                 if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
-        # ONLY check MOST RECENT completed H1 candle (not last 3 - that includes old price action)
-        # This prevents false signals from expired patterns
-        if len(candles) >= 1 and not candle_touched_support:
+        # ALSO check MOST RECENT completed H1 candle for strong rejection
+        # Check this regardless of current candle status to capture H1 rejections
+        if len(candles) >= 1:
             last_candle = candles.tail(1).iloc[0]
 
             # Check if candle low touched support (within 3 pips)
