@@ -416,13 +416,14 @@ class BullishProTraderGold:
         if not swing_lows:
             return {"detected": False, "score": 0}
 
-        # Check last 3 candles for liquidity grab pattern
-        last_3 = recent_candles.tail(3)
+        # Check last 2 candles for liquidity grab pattern (tighter recency filter)
+        # Score based on recency: 4 points if last candle, 3 points if 2 candles ago
+        last_2 = recent_candles.tail(2)
 
         for swing_low in swing_lows:
             swing_level = swing_low["level"]
 
-            for idx, candle in last_3.iterrows():
+            for candle_position, (idx, candle) in enumerate(last_2.iterrows()):
                 # Check if this candle spiked below the swing low
                 if candle['low'] < swing_level:
                     # Measure wick size
@@ -430,43 +431,52 @@ class BullishProTraderGold:
 
                     # Liquidity grab requirements:
                     # 1. Wick extends 5+ pips below swing level
-                    # 2. Strong rejection (wick 20+ pips OR 15+ pips)
+                    # 2. Strong rejection (wick 8+ pips)
                     # 3. Candle closed back above swing level
 
                     pips_below_swing = swing_level - candle['low']
 
                     # Professional thresholds: 5+ pips spike, 8+ pips rejection (institutional moves)
                     if pips_below_swing >= 5.0 and wick_size >= 8.0 and candle['close'] > swing_level:
+                        # Score based on recency
+                        # candle_position: 0 = 2 candles ago, 1 = last candle
+                        score = 4 if candle_position == 1 else 3
+                        freshness = "FRESH (last candle)" if candle_position == 1 else "RECENT (2 candles ago)"
+
                         # Liquidity grab confirmed!
                         return {
                             "detected": True,
-                            "score": 4,  # Highest score
+                            "score": score,
                             "grab_level": swing_level,
                             "grab_low": float(candle['low']),
                             "rejection_size": round(wick_size, 1),
                             "pips_below": round(pips_below_swing, 1),
-                            "description": f"🔥 Liquidity Grab at ${swing_level:.2f}! Price spiked to ${candle['low']:.2f} ({pips_below_swing:.1f} pips below) then rejected {wick_size:.1f} pips UP"
+                            "description": f"🔥 Liquidity Grab at ${swing_level:.2f}! Price spiked to ${candle['low']:.2f} ({pips_below_swing:.1f} pips below) then rejected {wick_size:.1f} pips UP - {freshness}"
                         }
 
-        # Also check H4 support levels for liquidity grabs
+        # Also check H4 support levels for liquidity grabs (last 2 candles only)
         support_levels = h4_levels.get("support_levels", [])
         for support in support_levels:
             if abs(support - current_price) < 30:  # Only check nearby levels
-                for idx, candle in last_3.iterrows():
+                for candle_position, (idx, candle) in enumerate(last_2.iterrows()):
                     if candle['low'] < support:
                         wick_size = candle['close'] - candle['low']
                         pips_below = support - candle['low']
 
                         # Professional thresholds: 5+ pips spike, 8+ pips rejection
                         if pips_below >= 5.0 and wick_size >= 8.0 and candle['close'] > support:
+                            # Score based on recency
+                            score = 4 if candle_position == 1 else 3
+                            freshness = "FRESH (last candle)" if candle_position == 1 else "RECENT (2 candles ago)"
+
                             return {
                                 "detected": True,
-                                "score": 4,
+                                "score": score,
                                 "grab_level": support,
                                 "grab_low": float(candle['low']),
                                 "rejection_size": round(wick_size, 1),
                                 "pips_below": round(pips_below, 1),
-                                "description": f"🔥 Liquidity Grab at H4 support ${support:.2f}! Price spiked to ${candle['low']:.2f} then rejected {wick_size:.1f} pips"
+                                "description": f"🔥 Liquidity Grab at H4 support ${support:.2f}! Price spiked to ${candle['low']:.2f} then rejected {wick_size:.1f} pips - {freshness}"
                             }
 
         return {"detected": False, "score": 0}
