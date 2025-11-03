@@ -74,15 +74,12 @@ class BearishProTraderGold:
             # CHECK IF ACTIVE TRADE EXISTS FIRST
             # If we have an active trade, monitor it instead of re-scanning
             if self.active_trade is not None:
-                trade_status = self._monitor_active_trade(current_price)
+                # Get current candle info FIRST
+                current_candle = await self._get_current_candle_info(h1_data, current_price)
+                trade_status = self._monitor_active_trade(current_price, current_candle)
 
                 # If trade is still active, return trade monitoring data
                 if trade_status["is_active"]:
-                    # Get context for display (but don't re-validate confluence)
-                    daily_analysis = self._analyze_daily_trend(d1_data, current_price)
-                    h4_levels = self._identify_key_levels_h4(h4_data, current_price)
-                    current_candle = await self._get_current_candle_info(h1_data, current_price)
-
                     return trade_status["response"]
                 else:
                     # Trade finished (TP or SL hit), clear it and resume scanning
@@ -2588,7 +2585,7 @@ class BearishProTraderGold:
             }
         }
 
-    def _monitor_active_trade(self, current_price: float) -> Dict[str, Any]:
+    def _monitor_active_trade(self, current_price: float, current_candle: Dict = None) -> Dict[str, Any]:
         """
         Monitor an active SHORT trade's progress toward TP/SL
         Don't re-validate confluences - just track price vs targets
@@ -2601,6 +2598,16 @@ class BearishProTraderGold:
         entry = self.active_trade["entry"]
         h4_levels = self.active_trade.get("h4_levels", {})
         daily_analysis = self.active_trade.get("daily_analysis", {})
+
+        # Use full current candle data if provided
+        if current_candle is None:
+            current_candle = {
+                "timeframe": "1H",
+                "current": current_price,
+                "entry": entry,
+                "pnl_pips": round(entry - current_price, 1) if entry else 0,
+                "pnl_percent": 0
+            }
 
         # Extract TP and SL levels
         tp1_str = trade_plan.get("take_profit_1", {}).get("price", "$0")
@@ -2692,10 +2699,9 @@ class BearishProTraderGold:
                 "session": self._explain_session_context()
             },
 
-            # Show current candle (for context)
+            # Show current candle (full data with high/low/open + P&L)
             "live_candle": {
-                "timeframe": "1H",
-                "current": current_price,
+                **current_candle,  # Include all candle data (high, low, open, time_remaining, etc.)
                 "entry": entry,
                 "pnl_pips": round(pnl_pips, 1),
                 "pnl_percent": round(pnl_percent, 2)
