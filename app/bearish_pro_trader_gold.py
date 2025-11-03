@@ -2342,16 +2342,19 @@ class BearishProTraderGold:
         valid_tp2_levels = [s for s in nearby_support if (entry - s) >= min_tp2_distance]
 
         if len(valid_tp1_levels) >= 1 and len(valid_tp2_levels) >= 1:
-            # Use structure-based support levels
-            tp1 = valid_tp1_levels[0]  # First support meeting 2:1 R:R
-            tp2 = valid_tp2_levels[0] if valid_tp2_levels[0] != tp1 else (valid_tp2_levels[1] if len(valid_tp2_levels) > 1 else tp1 - 15)
-            tp1_reason = f"H4 support/liquidity pool at ${tp1:.2f}"
-            tp2_reason = f"Major H4 support at ${tp2:.2f}"
+            # Use structure-based support levels - place 5 pips BEFORE (above) to ensure fill
+            support_1 = valid_tp1_levels[0]
+            support_2 = valid_tp2_levels[0] if valid_tp2_levels[0] != support_1 else (valid_tp2_levels[1] if len(valid_tp2_levels) > 1 else support_1 - 15)
+            tp1 = support_1 + 0.50  # 5 pips before (above) support (1 pip = $0.10 for gold)
+            tp2 = support_2 + 0.50  # 5 pips before (above) support
+            tp1_reason = f"5 pips before H4 support ${support_1:.2f} (at ${tp1:.2f})"
+            tp2_reason = f"5 pips before H4 support ${support_2:.2f} (at ${tp2:.2f})"
         elif len(valid_tp1_levels) >= 1:
             # One valid support found
-            tp1 = valid_tp1_levels[0]
+            support_1 = valid_tp1_levels[0]
+            tp1 = support_1 + 0.50  # 5 pips before (above) support
             tp2 = entry - min_tp2_distance  # Use R:R based target for TP2
-            tp1_reason = f"H4 support at ${tp1:.2f}"
+            tp1_reason = f"5 pips before H4 support ${support_1:.2f} (at ${tp1:.2f})"
             tp2_reason = f"Extended target (3:1 R:R) at ${tp2:.2f}"
         else:
             # No structure found - use R:R based targets (2:1 and 3:1 minimum)

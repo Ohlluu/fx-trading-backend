@@ -2239,16 +2239,19 @@ class BullishProTraderGold:
         valid_tp2_levels = [r for r in nearby_resistance if (r - entry) >= min_tp2_distance]
 
         if len(valid_tp1_levels) >= 1 and len(valid_tp2_levels) >= 1:
-            # Use structure-based resistance levels
-            tp1 = valid_tp1_levels[0]  # First resistance meeting 2:1 R:R
-            tp2 = valid_tp2_levels[0] if valid_tp2_levels[0] != tp1 else (valid_tp2_levels[1] if len(valid_tp2_levels) > 1 else tp1 + 15)
-            tp1_reason = f"H4 resistance/liquidity pool at ${tp1:.2f}"
-            tp2_reason = f"Major H4 resistance at ${tp2:.2f}"
+            # Use structure-based resistance levels - place 5 pips BEFORE to ensure fill
+            resistance_1 = valid_tp1_levels[0]
+            resistance_2 = valid_tp2_levels[0] if valid_tp2_levels[0] != resistance_1 else (valid_tp2_levels[1] if len(valid_tp2_levels) > 1 else resistance_1 + 15)
+            tp1 = resistance_1 - 0.50  # 5 pips before resistance (1 pip = $0.10 for gold)
+            tp2 = resistance_2 - 0.50  # 5 pips before resistance
+            tp1_reason = f"5 pips before H4 resistance ${resistance_1:.2f} (at ${tp1:.2f})"
+            tp2_reason = f"5 pips before H4 resistance ${resistance_2:.2f} (at ${tp2:.2f})"
         elif len(valid_tp1_levels) >= 1:
             # One valid resistance found
-            tp1 = valid_tp1_levels[0]
+            resistance_1 = valid_tp1_levels[0]
+            tp1 = resistance_1 - 0.50  # 5 pips before resistance
             tp2 = entry + min_tp2_distance  # Use R:R based target for TP2
-            tp1_reason = f"H4 resistance at ${tp1:.2f}"
+            tp1_reason = f"5 pips before H4 resistance ${resistance_1:.2f} (at ${tp1:.2f})"
             tp2_reason = f"Extended target (3:1 R:R) at ${tp2:.2f}"
         else:
             # No structure found - use R:R based targets (2:1 and 3:1 minimum)
