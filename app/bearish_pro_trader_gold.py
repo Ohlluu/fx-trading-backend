@@ -2650,11 +2650,12 @@ class BearishProTraderGold:
             status = "TRADE_ACTIVE"
 
             # Show progress based on price location
-            distance_to_tp1 = current_price - tp1  # SHORT: distance is current - tp1
-            distance_to_sl = sl - current_price
+            # For gold: 1 pip = $0.10, so multiply dollar difference by 10
+            distance_to_tp1 = (current_price - tp1) * 10  # SHORT: distance is current - tp1
+            distance_to_sl = (sl - current_price) * 10
 
             if pnl_pips >= 0:
-                if distance_to_tp1 <= 5:
+                if distance_to_tp1 <= 50:  # Within 50 pips = approaching
                     status_message = f"🎯 Approaching TP1 (${tp1:.2f}) - {distance_to_tp1:.1f} pips away"
                 else:
                     status_message = f"📈 In Profit +{pnl_pips:.1f} pips | Target: TP1 ${tp1:.2f}"
@@ -2742,16 +2743,17 @@ class BearishProTraderGold:
             "step": 1,
             "status": "complete",
             "title": f"✅ Entered SHORT at ${entry:.2f}",
-            "details": f"Trade active with {abs(entry - sl):.1f} pip stop loss",
+            "details": f"Trade active with {abs(entry - sl) * 10:.1f} pip stop loss",
             "explanation": "Position opened based on 5+ confluence points"
         })
 
         # Step 2: TP1 status (SHORT: TP is below entry)
-        distance_to_tp1 = current_price - tp1  # For SHORT positions
+        # For gold: 1 pip = $0.10, so multiply dollar difference by 10
+        distance_to_tp1 = (current_price - tp1) * 10  # For SHORT positions
         if trade_result == "TP2_HIT" or trade_result == "TP1_HIT":
             tp1_status = "complete"
             tp1_title = f"✅ TP1 Hit at ${tp1:.2f}"
-        elif distance_to_tp1 <= 5:
+        elif distance_to_tp1 <= 50:  # Within 50 pips = approaching
             tp1_status = "in_progress"
             tp1_title = f"🎯 Approaching TP1 - {distance_to_tp1:.1f} pips away"
         else:
@@ -2767,7 +2769,8 @@ class BearishProTraderGold:
         })
 
         # Step 3: TP2 status
-        distance_to_tp2 = current_price - tp2  # For SHORT positions
+        # For gold: 1 pip = $0.10, so multiply dollar difference by 10
+        distance_to_tp2 = (current_price - tp2) * 10  # For SHORT positions
         if trade_result == "TP2_HIT":
             tp2_status = "complete"
             tp2_title = f"✅ TP2 Hit at ${tp2:.2f} - Trade Complete!"
