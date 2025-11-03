@@ -2165,6 +2165,14 @@ class BullishProTraderGold:
         demand_zone = next((c for c in confluences if c["type"] == "DEMAND_ZONE"), None)
         order_block = next((c for c in confluences if c["type"] == "ORDER_BLOCK"), None)
 
+        # Extract actual price from liquidity grab description
+        if liquidity_grab and key_level == 0:
+            # Parse "Liquidity Grab at H4 support $4000.00!" or similar
+            import re
+            match = re.search(r'\$(\d+(?:\.\d+)?)', liquidity_grab.get("description", ""))
+            if match:
+                key_level = float(match.group(1))
+
         # ENTRY LOGIC: Based on detected patterns
         if liquidity_grab:
             # Enter on pullback to liquidity grab level (safer entry after spike)
