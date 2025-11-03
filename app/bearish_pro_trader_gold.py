@@ -10,6 +10,8 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
 import pytz
+import json
+import os
 from .datafeed import fetch_h1
 from .current_price import get_current_xauusd_price
 from .mtf_cache import mtf_cache  # Import shared cache
@@ -44,6 +46,8 @@ class BearishProTraderGold:
 
         # ACTIVE TRADE TRACKER: Lock in setup when 5+ confluence triggers
         # Once a trade is active, stop re-validating confluences and just monitor TP/SL
+        # PERSISTED to file system so it survives across API calls
+        self.active_trade_file = "/tmp/active_trade_bearish.json"
         self.active_trade = None  # {"setup": {...}, "trade_plan": {...}, "triggered_at": timestamp, "entry": price}
 
     async def get_detailed_setup(self) -> Dict[str, Any]:
@@ -64,6 +68,9 @@ class BearishProTraderGold:
             if current_price is None:
                 current_price = float(h1_data['close'].iloc[-1])
 
+            # LOAD ACTIVE TRADE FROM FILE (persists across API calls)
+            self._load_active_trade()
+
             # CHECK IF ACTIVE TRADE EXISTS FIRST
             # If we have an active trade, monitor it instead of re-scanning
             if self.active_trade is not None:
@@ -80,6 +87,7 @@ class BearishProTraderGold:
                 else:
                     # Trade finished (TP or SL hit), clear it and resume scanning
                     self.active_trade = None
+                    self._delete_active_trade()
 
             # Analyze market structure across timeframes (using REAL data)
             daily_analysis = self._analyze_daily_trend(d1_data, current_price)
@@ -91,15 +99,17 @@ class BearishProTraderGold:
             if h1_setup.get("total_score", 0) >= 5:
                 trade_plan = self._build_trade_plan(h1_setup, h4_levels, current_price)
                 if trade_plan.get("status") == "Ready":
-                    # Save as active trade
+                    # Save as active trade (in memory AND file)
                     self.active_trade = {
                         "setup": h1_setup,
                         "trade_plan": trade_plan,
-                        "triggered_at": datetime.now(pytz.UTC),
+                        "triggered_at": datetime.now(pytz.UTC).isoformat(),
                         "entry": float(trade_plan["entry_price"].replace("$", "").replace(",", "")),
                         "h4_levels": h4_levels,
                         "daily_analysis": daily_analysis
                     }
+                    # Persist to file so it survives across API calls
+                    self._save_active_trade()
 
             # Get current candle details
             current_candle = await self._get_current_candle_info(h1_data, current_price)
@@ -2736,6 +2746,39 @@ class BearishProTraderGold:
         })
 
         return steps
+
+    def _load_active_trade(self):
+        """Load active trade from file if exists (persists across API calls)"""
+        if os.path.exists(self.active_trade_file):
+            try:
+                with open(self.active_trade_file, 'r') as f:
+                    self.active_trade = json.load(f)
+            except Exception as e:
+                # If file is corrupted, delete it and start fresh
+                print(f"Error loading active trade: {e}")
+                self.active_trade = None
+                if os.path.exists(self.active_trade_file):
+                    os.remove(self.active_trade_file)
+        else:
+            self.active_trade = None
+
+    def _save_active_trade(self):
+        """Save active trade to file (persists across API calls)"""
+        if self.active_trade is not None:
+            try:
+                with open(self.active_trade_file, 'w') as f:
+                    json.dump(self.active_trade, f, indent=2)
+            except Exception as e:
+                print(f"Error saving active trade: {e}")
+
+    def _delete_active_trade(self):
+        """Delete active trade file when trade exits"""
+        self.active_trade = None
+        if os.path.exists(self.active_trade_file):
+            try:
+                os.remove(self.active_trade_file)
+            except Exception as e:
+                print(f"Error deleting active trade: {e}")
 
     def _get_invalidation_conditions(self, setup: Dict) -> List[Dict[str, Any]]:
         """
