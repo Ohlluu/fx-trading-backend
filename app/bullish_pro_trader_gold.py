@@ -2133,15 +2133,39 @@ class BullishProTraderGold:
             "explanation": f"Multiple patterns aligned at ${key_level:.2f} support. Professional setup forming."
         })
 
-        # Step 2: Show current state
+        # Step 2: Dynamic entry status based on price location
+        entry_zone = key_level + 2
+        distance_to_entry = current_price - entry_zone
+
         if state == "WAITING_CONFIRMATION":
-            steps.append({
-                "step": 2,
-                "status": "in_progress",
-                "title": "⏳ Waiting for entry confirmation",
-                "details": f"Price: ${current_price:.2f} | Entry zone: ${key_level + 2:.2f}",
-                "explanation": "Setup is ready. Place limit order at entry zone or wait for price to reach it."
-            })
+            # Check if price is at/near entry zone (within 2 pips)
+            if abs(distance_to_entry) <= 2:
+                # PRICE AT ENTRY ZONE!
+                steps.append({
+                    "step": 2,
+                    "status": "complete",
+                    "title": "🎯 PRICE AT ENTRY ZONE - READY TO ENTER!",
+                    "details": f"Current: ${current_price:.2f} | Entry: ${entry_zone:.2f} ({abs(distance_to_entry):.1f} pips away)",
+                    "explanation": "Price reached entry zone! Enter now with market/limit order."
+                })
+            elif distance_to_entry > 2:
+                # Price above entry - waiting for pullback
+                steps.append({
+                    "step": 2,
+                    "status": "in_progress",
+                    "title": "⏳ Waiting for pullback to entry zone",
+                    "details": f"Price: ${current_price:.2f} | Entry: ${entry_zone:.2f} ({distance_to_entry:.1f} pips above)",
+                    "explanation": "Place limit order at entry or wait for price to pull back."
+                })
+            else:
+                # Price below entry - already through zone
+                steps.append({
+                    "step": 2,
+                    "status": "in_progress",
+                    "title": "⚠️ Price below entry zone",
+                    "details": f"Price: ${current_price:.2f} | Entry: ${entry_zone:.2f} ({abs(distance_to_entry):.1f} pips below)",
+                    "explanation": "Price moved below entry. Wait for price to come back up or monitor for invalidation."
+                })
 
         return steps
 
