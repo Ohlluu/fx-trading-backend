@@ -1499,6 +1499,8 @@ class BearishProTraderGold:
             return self._breakdown_retest_steps(setup, current_price, current_candle)
         elif pattern == "SUPPLY_ZONE":
             return self._supply_zone_steps(setup, current_price)
+        elif pattern == "CONFLUENCE_DETECTED":
+            return self._confluence_detected_steps(setup, current_price)
         else:
             return self._scanning_steps()
 
@@ -2206,6 +2208,40 @@ class BearishProTraderGold:
                 "title": "Entry criteria",
                 "details": "Waiting for price to reach order block zone",
                 "explanation": "Entry signal will trigger when price enters the OB."
+            })
+
+        return steps
+
+    def _confluence_detected_steps(self, setup: Dict, current_price: float) -> List[Dict[str, Any]]:
+        """Steps for CONFLUENCE_DETECTED pattern (BEARISH)"""
+        confluences = setup.get("confluences", [])
+        total_score = setup.get("total_score", 0)
+        key_level = setup.get("key_level")
+        state = setup.get("state", "WAITING_CONFIRMATION")
+
+        steps = []
+
+        # Step 1: Show all confluences detected
+        confluence_list = []
+        for conf in confluences:
+            confluence_list.append(f"• {conf['type'].replace('_', ' ').title()}: {conf['score']} points")
+
+        steps.append({
+            "step": 1,
+            "status": "complete",
+            "title": f"✅ {total_score} Confluence Points Detected",
+            "details": "\n".join(confluence_list),
+            "explanation": f"Multiple patterns aligned at ${key_level:.2f} resistance. Professional setup forming."
+        })
+
+        # Step 2: Show current state
+        if state == "WAITING_CONFIRMATION":
+            steps.append({
+                "step": 2,
+                "status": "in_progress",
+                "title": "⏳ Waiting for entry confirmation",
+                "details": f"Price: ${current_price:.2f} | Entry zone: ${key_level - 2:.2f}",
+                "explanation": "Setup is ready. Place limit order at entry zone or wait for price to reach it."
             })
 
         return steps
