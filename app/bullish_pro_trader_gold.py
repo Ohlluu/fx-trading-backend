@@ -2429,9 +2429,10 @@ class BullishProTraderGold:
             tp2_reason = f"Extended target (3:1 R:R) at ${tp2:.2f}"
 
         # Calculate R:R ratios
-        risk_pips = entry - sl
-        reward1_pips = tp1 - entry
-        reward2_pips = tp2 - entry
+        # For gold: 1 pip = $0.10, so multiply dollar difference by 10
+        risk_pips = (entry - sl) * 10
+        reward1_pips = (tp1 - entry) * 10
+        reward2_pips = (tp2 - entry) * 10
         rr1 = reward1_pips / risk_pips if risk_pips > 0 else 0
         rr2 = reward2_pips / risk_pips if risk_pips > 0 else 0
 

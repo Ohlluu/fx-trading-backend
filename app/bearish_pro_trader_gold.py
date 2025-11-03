@@ -2532,9 +2532,10 @@ class BearishProTraderGold:
             tp2_reason = f"Extended target (3:1 R:R) at ${tp2:.2f}"
 
         # Calculate R:R ratios
-        risk_pips = sl - entry
-        reward1_pips = entry - tp1
-        reward2_pips = entry - tp2
+        # For gold: 1 pip = $0.10, so multiply dollar difference by 10
+        risk_pips = (sl - entry) * 10
+        reward1_pips = (entry - tp1) * 10
+        reward2_pips = (entry - tp2) * 10
         rr1 = reward1_pips / risk_pips if risk_pips > 0 else 0
         rr2 = reward2_pips / risk_pips if risk_pips > 0 else 0
 
