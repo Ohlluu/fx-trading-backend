@@ -553,10 +553,12 @@ class BearishProTraderGold:
         if liquidity_grab["detected"]:
             confluences.append({
                 "type": "LIQUIDITY_GRAB",
-                "score": 4,
-                "description": liquidity_grab["description"]
+                "score": liquidity_grab["score"],  # Use actual score (4 or 3 based on recency)
+                "description": liquidity_grab["description"],
+                "grab_high": liquidity_grab.get("grab_high"),  # Pass actual high for SL calculation
+                "grab_level": liquidity_grab.get("grab_level")  # Pass grab level
             })
-            total_score += 4
+            total_score += liquidity_grab["score"]
 
         # Add FVG
         # STABILITY CHECK: Pattern must be stable for 10 minutes
@@ -2335,14 +2337,10 @@ class BearishProTraderGold:
         supply_zone = next((c for c in confluences if c["type"] == "SUPPLY_ZONE"), None)
         order_block = next((c for c in confluences if c["type"] == "ORDER_BLOCK"), None)
 
-        # Extract liquidity grab level from description if present
-        liquidity_grab_level = None
+        # Get actual liquidity grab high (not from description parsing!)
+        liquidity_grab_high = None
         if liquidity_grab:
-            # Parse "Liquidity Grab at H4 resistance $4000.00!" or similar
-            import re
-            match = re.search(r'\$(\d+(?:\.\d+)?)', liquidity_grab.get("description", ""))
-            if match:
-                liquidity_grab_level = float(match.group(1))
+            liquidity_grab_high = liquidity_grab.get("grab_high")
 
         # ENTRY LOGIC: Professional methodology (BEARISH)
         # Entry is at H4 resistance (key_level) or order block/FVG zone
@@ -2361,14 +2359,14 @@ class BearishProTraderGold:
             entry_reason = f"Enter at current price ${current_price:.2f}"
 
         # STOP LOSS: Professional methodology (BEARISH)
-        # SL goes above the liquidity grab level (where stops were swept)
+        # SL goes above the ACTUAL liquidity grab HIGH (where stops were swept)
         # This validates the setup failed if price returns to grab level
         resistance_levels = h4_levels.get("resistance_levels", [])
 
-        if liquidity_grab and liquidity_grab_level:
+        if liquidity_grab and liquidity_grab_high:
             # SL above the liquidity grab high (stops already swept)
-            sl = liquidity_grab_level + 5  # 5 pips above liquidity grab level
-            sl_reason = f"Above liquidity grab level (${liquidity_grab_level:.2f}) - stops already swept"
+            sl = liquidity_grab_high + 5  # 5 pips above ACTUAL grab high
+            sl_reason = f"Above liquidity grab high (${liquidity_grab_high:.2f}) - stops already swept"
         elif supply_zone and resistance_levels:
             # SL above supply zone
             sl = key_level + 10
