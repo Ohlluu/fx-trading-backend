@@ -947,6 +947,14 @@ class BullishProTraderGold:
                 if candle['close'] < key_level - 5:  # 5 pips buffer
                     return {"detected": False}  # Setup invalidated
 
+        # INVALIDATION CHECK: Time-based expiration (6+ candles without retest)
+        if len(candles_after_breakout) >= 6:
+            return {"detected": False}  # Setup expired - took too long
+
+        # INVALIDATION CHECK: Price ran away without retest (30+ pips above breakout level)
+        if current_price > key_level + 30:
+            return {"detected": False}  # Setup ran away - retest opportunity expired
+
         # Check if price has come back DOWN to test the level
         retest_happening = False
         rejection_confirmed = False
@@ -2383,6 +2391,29 @@ class BullishProTraderGold:
                 "reason": "Wick is good, but weak close = no buyers",
                 "action": "Wait for next candle confirmation",
                 "severity": "HIGH"
+            })
+
+        elif state == "RETEST_WAITING":
+            # Calculate dynamic distance threshold (30 pips for XAUUSD)
+            runaway_threshold = key_level + 30
+
+            conditions.append({
+                "condition": f"Price moves above ${runaway_threshold:.2f} without pullback",
+                "reason": "Setup ran away - retest opportunity expired (30+ pips above breakout)",
+                "action": "Cancel setup. Look for new entry or pattern.",
+                "severity": "HIGH"
+            })
+            conditions.append({
+                "condition": f"Price closes back below ${key_level:.2f}",
+                "reason": "Breakout failed - false breakout",
+                "action": "Cancel setup immediately. Breakout reversed.",
+                "severity": "CRITICAL"
+            })
+            conditions.append({
+                "condition": "6+ hours passed without retest",
+                "reason": "Setup expired - retest took too long",
+                "action": "Move on to new patterns. Opportunity missed.",
+                "severity": "MEDIUM"
             })
 
         elif state == "REJECTION_WAITING":
