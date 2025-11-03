@@ -1350,11 +1350,10 @@ class BearishProTraderGold:
         # Find nearest resistance level
         nearest_resistance = min(resistance_levels, key=lambda x: abs(x - current_price))
 
-        # Check if price is within 20 pips of resistance
-        # Increased from 10 to 20 pips to allow pattern to persist after rejection
+        # Check if price is within 8 pips of resistance (tight threshold for real supply zones)
         distance_to_resistance = nearest_resistance - current_price
 
-        if distance_to_resistance > 20 or distance_to_resistance < -5:
+        if distance_to_resistance > 8 or distance_to_resistance < -5:
             return {"detected": False}  # Too far away or already dropped too much
 
         # Check if current candle's high touched the resistance zone (M5 precision)
@@ -1366,24 +1365,24 @@ class BearishProTraderGold:
                 candle_touched_resistance = True
 
                 # Check for STRONG REJECTION:
-                # If price touched resistance and dropped 15+ pips from the touch point
+                # If price touched resistance and dropped 8+ pips from the touch point
                 rejection_distance = current_candle_high - current_price
                 if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
-        # ALSO check last 3 completed H1 candles for rejections from resistance
-        # This ensures we don't miss supply zones that already rejected
-        if len(candles) >= 3:
-            recent_candles = candles.tail(3)
-            for _, candle in recent_candles.iterrows():
-                # Check if candle high touched resistance (within 3 pips)
-                if candle['high'] >= nearest_resistance - 3:
-                    candle_touched_resistance = True
+        # ONLY check MOST RECENT completed H1 candle (not last 3 - that includes old price action)
+        # This prevents false signals from expired patterns
+        if len(candles) >= 1 and not candle_touched_resistance:
+            last_candle = candles.tail(1).iloc[0]
 
-                    # Check if it had strong rejection (8+ pips from high to close)
-                    candle_rejection = candle['high'] - candle['close']
-                    if candle_rejection >= 8.0:
-                        strong_rejection = True
+            # Check if candle high touched resistance (within 3 pips)
+            if last_candle['high'] >= nearest_resistance - 3:
+                candle_touched_resistance = True
+
+                # Check if it had strong rejection (8+ pips from high to close)
+                candle_rejection = last_candle['high'] - last_candle['close']
+                if candle_rejection >= 8.0:
+                    strong_rejection = True
 
         # Determine state based on price action
         if candle_touched_resistance:

@@ -1041,11 +1041,10 @@ class BullishProTraderGold:
         # Find nearest support level
         nearest_support = min(support_levels, key=lambda x: abs(x - current_price))
 
-        # Check if price is within 20 pips of support
-        # Increased from 10 to 20 pips to allow pattern to persist after bounce
+        # Check if price is within 8 pips of support (tight threshold for real demand zones)
         distance_to_support = current_price - nearest_support
 
-        if distance_to_support > 20 or distance_to_support < -5:
+        if distance_to_support > 8 or distance_to_support < -5:
             return {"detected": False}  # Too far away or already bounced too much
 
         # Check if current candle's low touched the support zone (M5 precision)
@@ -1062,19 +1061,19 @@ class BullishProTraderGold:
                 if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
                     strong_rejection = True
 
-        # ALSO check last 3 completed H1 candles for bounces from support
-        # This ensures we don't miss demand zones that already bounced
-        if len(candles) >= 3:
-            recent_candles = candles.tail(3)
-            for _, candle in recent_candles.iterrows():
-                # Check if candle low touched support (within 3 pips)
-                if candle['low'] <= nearest_support + 3:
-                    candle_touched_support = True
+        # ONLY check MOST RECENT completed H1 candle (not last 3 - that includes old price action)
+        # This prevents false signals from expired patterns
+        if len(candles) >= 1 and not candle_touched_support:
+            last_candle = candles.tail(1).iloc[0]
 
-                    # Check if it had strong rejection (8+ pips from low to close)
-                    candle_rejection = candle['close'] - candle['low']
-                    if candle_rejection >= 8.0:
-                        strong_rejection = True
+            # Check if candle low touched support (within 3 pips)
+            if last_candle['low'] <= nearest_support + 3:
+                candle_touched_support = True
+
+                # Check if it had strong rejection (8+ pips from low to close)
+                candle_rejection = last_candle['close'] - last_candle['low']
+                if candle_rejection >= 8.0:
+                    strong_rejection = True
 
         # Determine state based on price action
         if candle_touched_support:
