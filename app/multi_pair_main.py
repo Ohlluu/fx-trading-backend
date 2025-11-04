@@ -27,6 +27,8 @@ from .current_price import get_current_xauusd_price
 from .oanda_feed import get_current_price as get_current_gbpusd_price
 from .bullish_pro_trader_gold import get_bullish_pro_trader_analysis
 from .bearish_pro_trader_gold import get_bearish_pro_trader_analysis
+from .bullish_pro_trader_eurusd import get_bullish_pro_trader_analysis as get_bullish_eurusd_analysis
+from .bearish_pro_trader_eurusd import get_bearish_pro_trader_analysis as get_bearish_eurusd_analysis
 from .trade_manager import trade_manager
 from pydantic import BaseModel
 
@@ -433,6 +435,79 @@ async def scan_pro_trader_gold():
         return JSONResponse({
             "status": "error",
             "message": f"Pro Trader scan failed: {str(e)}",
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
+
+# PRO TRADER EUR/USD ENDPOINTS
+@app.get("/api/pro-trader-eurusd/analysis")
+async def get_pro_trader_eurusd_analysis():
+    """
+    Get BOTH Bullish and Bearish Professional Trader EUR/USD analysis
+    Returns both BUY setups and SELL setups in one response
+    """
+    try:
+        # Run both analyses in parallel
+        bullish_result, bearish_result = await asyncio.gather(
+            get_bullish_eurusd_analysis(),
+            get_bearish_eurusd_analysis()
+        )
+
+        return JSONResponse({
+            "bullish": bullish_result,
+            "bearish": bearish_result,
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        })
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": f"Pro Trader EUR/USD analysis failed: {str(e)}",
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
+
+@app.get("/api/pro-trader-eurusd/bullish")
+async def get_eurusd_bullish_only():
+    """Get BULLISH (BUY) EUR/USD setups only"""
+    try:
+        result = await get_bullish_eurusd_analysis()
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": f"Bullish EUR/USD analysis failed: {str(e)}",
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
+
+@app.get("/api/pro-trader-eurusd/bearish")
+async def get_eurusd_bearish_only():
+    """Get BEARISH (SELL) EUR/USD setups only"""
+    try:
+        result = await get_bearish_eurusd_analysis()
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": f"Bearish EUR/USD analysis failed: {str(e)}",
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        }, status_code=500)
+
+@app.post("/api/pro-trader-eurusd/scan")
+async def scan_pro_trader_eurusd():
+    """Force refresh BOTH Bullish and Bearish EUR/USD analysis"""
+    try:
+        bullish_result, bearish_result = await asyncio.gather(
+            get_bullish_eurusd_analysis(),
+            get_bearish_eurusd_analysis()
+        )
+
+        return JSONResponse({
+            "bullish": bullish_result,
+            "bearish": bearish_result,
+            "timestamp": datetime.now(pytz.UTC).isoformat()
+        })
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": f"Pro Trader EUR/USD scan failed: {str(e)}",
             "timestamp": datetime.now(pytz.UTC).isoformat()
         }, status_code=500)
 
