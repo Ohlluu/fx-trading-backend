@@ -260,12 +260,25 @@ async def fetch_h1(symbol: str, timeframe: str = "H1") -> pd.DataFrame:
         from .oanda_feed import get_gbpusd_candles
         return await get_gbpusd_candles(count=1000)
 
-    # Check if it's a 6-letter FX pair (EURUSD, USDJPY, etc.) - route to OANDA
+    if s == "EURUSD":
+        from .oanda_feed import get_eurusd_candles
+        # Map our timeframe format to OANDA granularity
+        granularity_map = {
+            "D1": "D",      # Daily
+            "H4": "H4",     # 4-hour
+            "H1": "H1",     # 1-hour
+            "M15": "M15",   # 15-minute
+            "M5": "M5"      # 5-minute
+        }
+        oanda_granularity = granularity_map.get(timeframe, "H1")
+        return await get_eurusd_candles(count=1000, granularity=oanda_granularity)
+
+    # Check if it's a 6-letter FX pair (USDJPY, etc.) - route to OANDA
     if len(s) == 6 and s.isalpha() and not _is_index(s):
         from .oanda_feed import get_current_price
         # For other FX pairs, we'd need to add similar functions to oanda_feed.py
         # For now, raise an error indicating we need OANDA implementation
-        raise NotImplementedError(f"OANDA implementation needed for {s}. Currently only XAUUSD and GBPUSD are implemented.")
+        raise NotImplementedError(f"OANDA implementation needed for {s}. Currently only XAUUSD, GBPUSD, and EURUSD are implemented.")
 
     # Non-FX index path (use TwelveData)
     if _is_index(s):

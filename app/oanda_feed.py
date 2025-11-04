@@ -346,6 +346,85 @@ async def get_current_price(instrument: str) -> Optional[float]:
         print(f"❌ OANDA API error for {instrument}: {e}")
         return None
 
+async def get_candles_generic(instrument: str, count: int = 1000, granularity: str = "H1") -> Optional[pd.DataFrame]:
+    """
+    Get historical candles for any OANDA instrument
+    Args:
+        instrument: OANDA format like 'EUR_USD', 'GBP_USD', 'XAU_USD', etc.
+        count: Number of candles to fetch (max 5000)
+        granularity: OANDA timeframe - "D", "H4", "H1", "M15", "M5"
+    Returns DataFrame with columns: time, open, high, low, close, volume
+    """
+    url = f"{OANDA_BASE_URL}/instruments/{instrument}/candles"
+    headers = {
+        "Authorization": f"Bearer {OANDA_API_KEY}",
+        "Accept-Datetime-Format": "UNIX"
+    }
+    params = {
+        "granularity": granularity,
+        "count": count,
+        "price": "M",  # Mid prices
+        "includeIncompleteCandles": "false"
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(url, headers=headers, params=params)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                if "candles" in data and data["candles"]:
+                    candles = data["candles"]
+
+                    # Convert to our standard format
+                    rows = []
+                    for candle in candles:
+                        # Convert timestamp to datetime
+                        timestamp = datetime.fromtimestamp(float(candle["time"]), tz=pytz.UTC)
+
+                        # Extract OHLC from mid prices
+                        mid = candle.get("mid", {})
+
+                        row = {
+                            "time": timestamp,
+                            "open": float(mid.get("o", 0)),
+                            "high": float(mid.get("h", 0)),
+                            "low": float(mid.get("l", 0)),
+                            "close": float(mid.get("c", 0)),
+                            "volume": int(candle.get("volume", 0))
+                        }
+                        rows.append(row)
+
+                    # Create DataFrame
+                    df = pd.DataFrame(rows)
+                    df.set_index("time", inplace=True)
+                    df.sort_index(inplace=True)
+
+                    # Extra filter: ensure we exclude the current hour to prevent signal instability
+                    current_hour = dt_helper.now(pytz.UTC).replace(minute=0, second=0, microsecond=0)
+                    df = df[df.index < current_hour]
+
+                    print(f"✅ OANDA {instrument}: Retrieved {len(df)} candles from {df.index[0]} to {df.index[-1]} (excluding current hour)")
+                    return df
+                else:
+                    print(f"❌ No {instrument} candles in response")
+                    return None
+            else:
+                print(f"❌ OANDA API error for {instrument}: {response.status_code}")
+                return None
+
+    except Exception as e:
+        print(f"❌ OANDA {instrument} candle fetch error: {e}")
+        return None
+
+async def get_eurusd_candles(count: int = 1000, granularity: str = "H1") -> Optional[pd.DataFrame]:
+    """
+    Get historical EURUSD candles from OANDA
+    Returns DataFrame with columns: time, open, high, low, close, volume
+    """
+    return await get_candles_generic("EUR_USD", count, granularity)
+
 async def get_gbpusd_candles(count: int = 1000) -> Optional[pd.DataFrame]:
     """
     Get historical GBPUSD hourly candles from OANDA
