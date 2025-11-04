@@ -660,14 +660,22 @@ class BullishProTraderEURUSD:
             total_score += liquidity_grab["score"]
 
         # Add FVG
-        # Pattern shows immediately when detected (professional methodology)
+        # Only give points when price is ACTUALLY IN or REJECTED FROM the FVG zone
+        # Don't give points just because FVG exists somewhere below price
         if fvg_setup["detected"]:
-            confluences.append({
-                "type": "FVG",
-                "score": 3,
-                "description": f"FVG at ${fvg_setup.get('fvg_zone', {}).get('midpoint', 0):.5f}"
-            })
-            total_score += 3
+            state = fvg_setup.get("state", "")
+            strong_rejection = fvg_setup.get("strong_rejection", False)
+
+            # Only count if price is IN the FVG or has been strongly rejected from it
+            # Don't give points when just "DETECTED" or "APPROACHING"
+            if state == "IN_FVG" or strong_rejection:
+                confluences.append({
+                    "type": "FVG",
+                    "score": 3,
+                    "description": f"FVG at ${fvg_setup.get('fvg_zone', {}).get('midpoint', 0):.5f}"
+                })
+                total_score += 3
+            # else: FVG detected but price not there yet - don't give points
 
         # Add Order Block
         if ob_setup["detected"]:
@@ -694,14 +702,20 @@ class BullishProTraderEURUSD:
                 total_score += 3
 
         # Add Breakout Retest
-        # Pattern shows immediately when detected (professional methodology)
+        # Only give points when retest is ACTUALLY HAPPENING, not just detected
         if breakout_setup["detected"]:
-            confluences.append({
-                "type": "BREAKOUT_RETEST",
-                "score": 2,
-                "description": f"Breakout Retest at ${breakout_setup.get('key_level', 0):.5f}"
-            })
-            total_score += 2
+            state = breakout_setup.get("state", "")
+
+            # Only count if retest is happening or rejection confirmed
+            # Don't give points during "RETEST_WAITING" - that's too early
+            if state in ["REJECTION_WAITING", "CONFIRMATION_WAITING"]:
+                confluences.append({
+                    "type": "BREAKOUT_RETEST",
+                    "score": 2,
+                    "description": f"Breakout Retest at ${breakout_setup.get('key_level', 0):.5f}"
+                })
+                total_score += 2
+            # else: Breakout detected but retest not happening yet - don't give points
 
         # Add Demand Zone
         # TEMPORARILY REMOVED STABILITY CHECK TO DEBUG
