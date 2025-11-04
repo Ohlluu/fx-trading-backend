@@ -615,11 +615,12 @@ class BullishProTraderEURUSD:
             }
 
         # STEP 2: Check ALL patterns (don't stop at first match)
-        fvg_setup = self._check_fvg(last_candles, current_price, current_candle_low)
-        ob_setup = await self._check_order_block(last_candles, current_price, current_candle_low)
-        breakout_setup = self._check_breakout_retest(last_candles, key_level, current_price, current_candle_low)
-        demand_setup = self._check_demand_zone(last_candles, h4_levels, current_price, current_candle_low)
-        liquidity_grab = self._check_liquidity_grab(last_candles, current_price, h4_levels, current_candle_low)
+        # PROFESSIONAL: Use only closed candles, no forming candle data
+        fvg_setup = self._check_fvg(last_candles, current_price)
+        ob_setup = await self._check_order_block(last_candles, current_price)
+        breakout_setup = self._check_breakout_retest(last_candles, key_level, current_price)
+        demand_setup = self._check_demand_zone(last_candles, h4_levels, current_price)
+        liquidity_grab = self._check_liquidity_grab(last_candles, current_price, h4_levels)
 
         # STEP 3: Calculate confluence score
         confluences = []
@@ -1026,7 +1027,7 @@ class BullishProTraderEURUSD:
             "time_in_state_minutes": round(time_in_state, 1)
         }
 
-    def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float, current_candle_low: float = None) -> Dict[str, Any]:
+    def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float) -> Dict[str, Any]:
         """
         Check for Breakout Retest pattern:
         1. Price was below resistance
@@ -1077,19 +1078,11 @@ class BullishProTraderEURUSD:
         if current_price > key_level + 20:
             return {"detected": False}  # Setup ran away - retest opportunity expired
 
-        # Check if price has come back DOWN to test the level
+        # PROFESSIONAL RULE: Only check CLOSED H1 candles after breakout
         retest_happening = False
         rejection_confirmed = False
 
-        # First check M5 precision: did current candle's low touch the level?
-        candle_touched_level = False
-        if current_candle_low is not None:
-            distance_to_level = current_candle_low - key_level  # Positive if price above level
-            if distance_to_level <= 3 and distance_to_level >= -2:  # Within 3 pips
-                candle_touched_level = True
-                retest_happening = True
-
-        # Also check closed H1 candles after breakout
+        # Check only CLOSED H1 candles after breakout (no forming candles)
         if len(candles_after_breakout) > 0:
             # Retest = price returned DOWN close to key level (from above)
             # MUST actually reach within 3 pips of the level to count as a retest
@@ -1097,13 +1090,13 @@ class BullishProTraderEURUSD:
                 distance_to_level = candle['low'] - key_level  # Positive if price above level
 
                 # Only count as retest if LOW actually reached within 3 pips of support
-                if distance_to_level <= 3 and distance_to_level >= -2:  # Within 3 pips above or 2 pips below
+                if distance_to_level <= 0.0003 and distance_to_level >= -0.0002:  # Within 3 pips above or 2 pips below
                     retest_happening = True
 
                     # Check for BULLISH rejection (long LOWER wick + close ABOVE)
                     wick_size = min(candle['open'], candle['close']) - candle['low']
-                    # wick_size > 0.3 = 3 pips, close > key_level + 0.5 = 5 pips above
-                    if wick_size > 0.3 and candle['close'] > key_level + 0.5:
+                    # wick_size > 0.00003 = 3 pips, close > key_level + 0.00005 = 5 pips above
+                    if wick_size > 0.00003 and candle['close'] > key_level + 0.00005:
                         rejection_confirmed = True
 
         # Determine state
@@ -1224,7 +1217,7 @@ class BullishProTraderEURUSD:
             "strong_rejection": strong_rejection  # Conservative confirmation flag
         }
 
-    def _check_fvg(self, candles: pd.DataFrame, current_price: float, current_candle_low: float = None) -> Dict[str, Any]:
+    def _check_fvg(self, candles: pd.DataFrame, current_price: float) -> Dict[str, Any]:
         """
         Check for BULLISH Fair Value Gap (FVG) pattern:
 
@@ -1302,33 +1295,43 @@ class BullishProTraderEURUSD:
         if distance_to_fvg > 20:
             return {"detected": False}  # Too far away
 
-        # Check if current candle's low touched the FVG zone (M5 precision)
+        # PROFESSIONAL RULE: Only check CLOSED H1 candles, not forming candles
+        # Check if any recent CLOSED candle touched the FVG zone
         candle_touched_fvg = False
         strong_rejection = False
-        if current_candle_low is not None:
-            # Check if the low of current candle went into or below the FVG zone
-            if current_candle_low <= nearest_fvg["top"]:
+
+        # Check last 3 closed H1 candles for interaction with FVG zone
+        recent_candles = candles.tail(3)
+        for idx, candle in recent_candles.iterrows():
+            # Check if candle's LOW reached the FVG zone
+            if candle['low'] <= nearest_fvg["top"]:
                 candle_touched_fvg = True
 
-                # Check for STRONG REJECTION:
-                # If price touched FVG and bounced 8+ pips from the touch point (professional standard)
-                rejection_distance = current_price - current_candle_low
-                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
-                    strong_rejection = True
+                # Check for STRONG REJECTION (bullish):
+                # Low touched FVG + closed significantly above (0.0008 = 8 pips for EUR/USD)
+                wick_size = min(candle['open'], candle['close']) - candle['low']
+                rejection_distance = candle['close'] - candle['low']
 
-        # Determine state based on proximity and price action
-        if candle_touched_fvg or (current_price <= nearest_fvg["top"] and current_price >= nearest_fvg["bottom"]):
-            # Price is INSIDE the gap (filling it now!)
-            state = "IN_FVG"
+                # Strong rejection = wick into zone + close 8+ pips above the touch
+                if wick_size > 0.0003 and rejection_distance >= 0.0008:
+                    strong_rejection = True
+                    break
+
+        # Determine state based on CLOSED candle price action only
+        last_close = float(candles.iloc[-1]['close'])
+        if candle_touched_fvg and strong_rejection:
+            state = "IN_FVG"  # Touched and rejected - ready for entry
             progress = "3/5"
             confirmations = 2
+        elif candle_touched_fvg:
+            state = "IN_FVG"  # In the zone but no strong rejection yet
+            progress = "2/5"
+            confirmations = 1
         elif distance_to_fvg <= 10:
-            # Price is very close (within 10 pips)
             state = "APPROACHING"
             progress = "2/5"
             confirmations = 1
         else:
-            # Price is nearby (10-20 pips away)
             state = "DETECTED"
             progress = "1/5"
             confirmations = 0
