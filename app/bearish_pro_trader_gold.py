@@ -482,10 +482,10 @@ class BearishProTraderGold:
                     # 2. Strong rejection (wick 8+ pips)
                     # 3. Price currently back below swing level
                     if pips_above_swing >= 5.0 and wick_size >= 8.0 and current_price < swing_level:
-                        # HIGHEST SCORE (5 points) - happening RIGHT NOW!
+                        # LIVE GRAB SCORE (4 points) - same as bullish to prevent single-pattern trades
                         return {
                             "detected": True,
-                            "score": 5,
+                            "score": 4,
                             "grab_level": swing_level,
                             "grab_high": current_candle_high,
                             "rejection_size": round(wick_size, 1),
@@ -504,7 +504,7 @@ class BearishProTraderGold:
                         if pips_above >= 5.0 and wick_size >= 8.0 and current_price < resistance:
                             return {
                                 "detected": True,
-                                "score": 5,
+                                "score": 4,
                                 "grab_level": resistance,
                                 "grab_high": current_candle_high,
                                 "rejection_size": round(wick_size, 1),
@@ -2620,12 +2620,16 @@ class BearishProTraderGold:
         sl = float(sl_str.replace("$", "").replace(",", ""))
 
         # Check if TP or SL hit (SHORT: TP is below entry, SL is above)
+        # For SHORT trades: Check LOW for TP (price touched below), HIGH for SL (price touched above)
         trade_result = None
-        if current_price <= tp2:
+        candle_high = current_candle.get('high', current_price)
+        candle_low = current_candle.get('low', current_price)
+
+        if candle_low <= tp2:
             trade_result = "TP2_HIT"
-        elif current_price <= tp1:
+        elif candle_low <= tp1:
             trade_result = "TP1_HIT"
-        elif current_price >= sl:
+        elif candle_high >= sl:
             trade_result = "SL_HIT"
 
         # Calculate current P&L (SHORT: profit when price goes down)

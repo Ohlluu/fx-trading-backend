@@ -482,10 +482,10 @@ class BullishProTraderGold:
                     # 2. Strong rejection (wick 8+ pips)
                     # 3. Price currently back above swing level
                     if pips_below_swing >= 5.0 and wick_size >= 8.0 and current_price > swing_level:
-                        # HIGHEST SCORE (5 points) - happening RIGHT NOW!
+                        # LIVE GRAB SCORE (4 points) - prevents single-pattern trades
                         return {
                             "detected": True,
-                            "score": 5,
+                            "score": 4,
                             "grab_level": swing_level,
                             "grab_low": current_candle_low,
                             "rejection_size": round(wick_size, 1),
@@ -504,7 +504,7 @@ class BullishProTraderGold:
                         if pips_below >= 5.0 and wick_size >= 8.0 and current_price > support:
                             return {
                                 "detected": True,
-                                "score": 5,
+                                "score": 4,
                                 "grab_level": support,
                                 "grab_low": current_candle_low,
                                 "rejection_size": round(wick_size, 1),
@@ -2517,12 +2517,16 @@ class BullishProTraderGold:
         sl = float(sl_str.replace("$", "").replace(",", ""))
 
         # Check if TP or SL hit
+        # For LONG trades: Check HIGH for TP (price touched above), LOW for SL (price touched below)
         trade_result = None
-        if current_price >= tp2:
+        candle_high = current_candle.get('high', current_price)
+        candle_low = current_candle.get('low', current_price)
+
+        if candle_high >= tp2:
             trade_result = "TP2_HIT"
-        elif current_price >= tp1:
+        elif candle_high >= tp1:
             trade_result = "TP1_HIT"
-        elif current_price <= sl:
+        elif candle_low <= sl:
             trade_result = "SL_HIT"
 
         # Calculate current P&L
