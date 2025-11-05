@@ -1374,19 +1374,23 @@ class BearishProTraderGold:
                 self.active_ob_touch = None
                 has_active_touch = False
 
-        # Check if current candle's high touched the OB zone
+        # PROFESSIONAL: Check last 3 CLOSED H1 candles for touches to the OB zone
         candle_touched_ob = False
         strong_rejection = False
-        if current_candle_high is not None:
-            # Check if the high of current candle went into or above the OB zone
-            if current_candle_high >= nearest_ob["bottom"]:
-                candle_touched_ob = True
 
-                # Check for STRONG REJECTION:
-                # If price touched OB and dropped 15+ pips from the touch point
-                rejection_distance = current_candle_high - current_price
-                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
-                    strong_rejection = True
+        if len(candles) >= 3:
+            recent_candles = candles.tail(3)
+
+            for idx, candle in recent_candles.iterrows():
+                # Check if candle high touched the OB zone (price went into or above the bottom)
+                if candle['high'] >= nearest_ob["bottom"]:
+                    candle_touched_ob = True
+
+                    # Check for STRONG REJECTION: candle touched OB and closed 8+ pips below the high
+                    rejection_distance = candle['high'] - candle['close']
+                    if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
+                        strong_rejection = True
+                        break
 
         # Determine state based on proximity
         if current_price >= nearest_ob["bottom"] and current_price <= nearest_ob["top"]:

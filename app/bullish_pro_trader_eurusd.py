@@ -1509,19 +1509,23 @@ class BullishProTraderEURUSD:
             # Price is above the zone on H1 data, but check M5 for precise touches
             m5_touched = await self._check_ob_zone_touched_m5(nearest_ob["top"], nearest_ob["bottom"], lookback_hours=3)
 
-        # Check if current candle's low touched the OB zone
+        # PROFESSIONAL: Check last 3 CLOSED H1 candles for touches to the OB zone
         candle_touched_ob = False
         strong_rejection = False
-        if current_candle_low is not None:
-            # Check if the low of current candle went into or below the OB zone
-            if current_candle_low <= nearest_ob["top"]:
-                candle_touched_ob = True
 
-                # Check for STRONG REJECTION:
-                # If price touched OB and bounced 8+ pips from the touch point (professional standard)
-                rejection_distance = current_price - current_candle_low
-                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
-                    strong_rejection = True
+        if len(candles) >= 3:
+            recent_candles = candles.tail(3)
+
+            for idx, candle in recent_candles.iterrows():
+                # Check if candle low touched the OB zone (price went into or below the top)
+                if candle['low'] <= nearest_ob["top"]:
+                    candle_touched_ob = True
+
+                    # Check for STRONG REJECTION: candle touched OB and closed 8+ pips above the low
+                    rejection_distance = candle['close'] - candle['low']
+                    if rejection_distance >= 0.0008:  # 8+ pips = 0.0008 for EUR/USD
+                        strong_rejection = True
+                        break
 
         # Determine state based on proximity and M5 data
         if current_price <= nearest_ob["top"] and current_price >= nearest_ob["bottom"]:
