@@ -2412,9 +2412,9 @@ class BullishProTraderGold:
             sl = liquidity_grab_low - 5  # 5 pips below ACTUAL grab low
             sl_reason = f"Below liquidity grab low (${liquidity_grab_low:.2f}) - stops already swept"
         elif demand_zone and support_levels:
-            # SL below demand zone
-            sl = key_level - 10
-            sl_reason = f"Below demand zone (${key_level:.2f}) with buffer"
+            # SL below demand zone (6 pips buffer = $6 for Gold)
+            sl = key_level - 6
+            sl_reason = f"Below demand zone (${key_level:.2f}) with 6 pip buffer"
         else:
             # Default: 15 pips below entry
             sl = entry - 15

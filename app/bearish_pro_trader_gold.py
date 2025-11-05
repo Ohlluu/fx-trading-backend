@@ -2518,9 +2518,9 @@ class BearishProTraderGold:
             sl = liquidity_grab_high + 5  # 5 pips above ACTUAL grab high
             sl_reason = f"Above liquidity grab high (${liquidity_grab_high:.2f}) - stops already swept"
         elif supply_zone and resistance_levels:
-            # SL above supply zone
-            sl = key_level + 10
-            sl_reason = f"Above supply zone (${key_level:.2f}) with buffer"
+            # SL above supply zone (6 pips buffer = $6 for Gold)
+            sl = key_level + 6
+            sl_reason = f"Above supply zone (${key_level:.2f}) with 6 pip buffer"
         else:
             # Default: 15 pips above entry
             sl = entry + 15

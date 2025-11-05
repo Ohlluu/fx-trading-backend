@@ -2518,9 +2518,9 @@ class BearishProTraderEURUSD:
             sl = liquidity_grab_high + 0.0005  # 5 pips above ACTUAL grab high
             sl_reason = f"Above liquidity grab high (${liquidity_grab_high:.5f}) - stops already swept"
         elif supply_zone and resistance_levels:
-            # SL above supply zone
-            sl = key_level + 0.0010
-            sl_reason = f"Above supply zone (${key_level:.5f}) with buffer"
+            # SL above supply zone (6 pips buffer = 0.0006 for EUR/USD)
+            sl = key_level + 0.0006
+            sl_reason = f"Above supply zone (${key_level:.5f}) with 6 pip buffer"
         else:
             # Default: 15 pips above entry
             sl = entry + 0.0015

@@ -2413,9 +2413,9 @@ class BullishProTraderEURUSD:
             sl = liquidity_grab_low - 0.0005  # 5 pips below ACTUAL grab low
             sl_reason = f"Below liquidity grab low (${liquidity_grab_low:.5f}) - stops already swept"
         elif demand_zone and support_levels:
-            # SL below demand zone
-            sl = key_level - 0.0010
-            sl_reason = f"Below demand zone (${key_level:.5f}) with buffer"
+            # SL below demand zone (6 pips buffer = 0.0006 for EUR/USD)
+            sl = key_level - 0.0006
+            sl_reason = f"Below demand zone (${key_level:.5f}) with 6 pip buffer"
         else:
             # Default: 15 pips below entry
             sl = entry - 0.0015
