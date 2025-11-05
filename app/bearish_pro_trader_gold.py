@@ -2689,6 +2689,19 @@ class BearishProTraderGold:
         if self.active_trade is None:
             return {"is_active": False}
 
+        # TIME-BASED EXIT: After 12 hours, close setup and look for new one
+        triggered_at_str = self.active_trade.get("triggered_at")
+        if triggered_at_str:
+            triggered_at = datetime.fromisoformat(triggered_at_str)
+            now_utc = datetime.now(pytz.UTC)
+            hours_elapsed = (now_utc - triggered_at).total_seconds() / 3600
+
+            if hours_elapsed >= 12:
+                # Clear active trade - resume scanning for new setups
+                self.active_trade = None
+                self._save_active_trade()  # Clear from file
+                return {"is_active": False}
+
         trade_plan = self.active_trade["trade_plan"]
         setup = self.active_trade["setup"]
         entry = self.active_trade["entry"]
