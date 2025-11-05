@@ -612,12 +612,12 @@ class BullishProTraderGold:
             }
 
         # STEP 2: Check ALL patterns (don't stop at first match)
-        # PROFESSIONAL: Use only closed candles, no forming candle data
+        # PROFESSIONAL: Use only closed candles, EXCEPT Liquidity Grab (real-time detection)
         fvg_setup = self._check_fvg(last_candles, current_price)
         ob_setup = await self._check_order_block(last_candles, current_price)
         breakout_setup = self._check_breakout_retest(last_candles, key_level, current_price)
         demand_setup = self._check_demand_zone(last_candles, h4_levels, current_price)
-        liquidity_grab = self._check_liquidity_grab(last_candles, current_price, h4_levels)
+        liquidity_grab = self._check_liquidity_grab(last_candles, current_price, h4_levels, current_candle_low)  # Uses forming candle for real-time spike detection
 
         # STEP 3: Calculate confluence score
         confluences = []
