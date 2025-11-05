@@ -1076,14 +1076,6 @@ class BullishProTraderEURUSD:
                 if candle['close'] < key_level - 0.0005:  # 5 pips buffer
                     return {"detected": False}  # Setup invalidated
 
-        # INVALIDATION CHECK: Time-based expiration (4+ candles without retest)
-        if len(candles_after_breakout) >= 4:
-            return {"detected": False}  # Setup expired - took too long
-
-        # INVALIDATION CHECK: Price ran away without retest (20+ pips above breakout level)
-        if current_price > key_level + 20:
-            return {"detected": False}  # Setup ran away - retest opportunity expired
-
         # PROFESSIONAL RULE: Only check CLOSED H1 candles after breakout
         retest_happening = False
         rejection_confirmed = False
@@ -1104,6 +1096,17 @@ class BullishProTraderEURUSD:
                     # wick_size > 0.00003 = 3 pips, close > key_level + 0.00005 = 5 pips above
                     if wick_size > 0.00003 and candle['close'] > key_level + 0.00005:
                         rejection_confirmed = True
+
+        # INVALIDATION CHECKS: Only apply if NO confirmation yet
+        # Once retest confirmed by closed candles, keep pattern visible
+        if not rejection_confirmed and not retest_happening:
+            # Time-based expiration (4+ candles without retest)
+            if len(candles_after_breakout) >= 4:
+                return {"detected": False}  # Setup expired - took too long
+
+            # Price ran away without retest (20+ pips above breakout level)
+            if current_price > key_level + 0.0020:  # 20 pips = 0.0020 for EUR/USD
+                return {"detected": False}  # Setup ran away - retest opportunity expired
 
         # Determine state
         if rejection_confirmed:
@@ -1290,11 +1293,8 @@ class BullishProTraderEURUSD:
         # Get the nearest FVG (closest to current price)
         nearest_fvg = min(fvgs_below, key=lambda x: abs(current_price - x["midpoint"]))
 
-        # Check if price is approaching the FVG (within 20 pips)
+        # Calculate distance for state determination
         distance_to_fvg = current_price - nearest_fvg["midpoint"]
-
-        if distance_to_fvg > 20:
-            return {"detected": False}  # Too far away
 
         # PROFESSIONAL RULE: Only check CLOSED H1 candles, not forming candles
         # Check if any recent CLOSED candle touched the FVG zone
@@ -1317,6 +1317,12 @@ class BullishProTraderEURUSD:
                 if wick_size > 0.0003 and rejection_distance >= 0.0008:
                     strong_rejection = True
                     break
+
+        # Only check proximity if no strong rejection yet
+        # Once closed candle confirms rejection, keep FVG visible regardless of distance
+        if not strong_rejection and not candle_touched_fvg:
+            if distance_to_fvg > 0.0020:  # 20 pips = 0.0020 for EUR/USD
+                return {"detected": False}  # Too far away and no confirmation yet
 
         # Determine state based on CLOSED candle price action only
         last_close = float(candles.iloc[-1]['close'])

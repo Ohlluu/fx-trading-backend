@@ -1074,14 +1074,6 @@ class BullishProTraderGold:
                 if candle['close'] < key_level - 5:  # 5 pips buffer
                     return {"detected": False}  # Setup invalidated
 
-        # INVALIDATION CHECK: Time-based expiration (4+ candles without retest)
-        if len(candles_after_breakout) >= 4:
-            return {"detected": False}  # Setup expired - took too long
-
-        # INVALIDATION CHECK: Price ran away without retest (20+ pips above breakout level)
-        if current_price > key_level + 20:
-            return {"detected": False}  # Setup ran away - retest opportunity expired
-
         # PROFESSIONAL RULE: Only check CLOSED H1 candles after breakout
         retest_happening = False
         rejection_confirmed = False
@@ -1102,6 +1094,17 @@ class BullishProTraderGold:
                     # wick_size > 0.3 = 3 pips, close > key_level + 0.5 = 5 pips above
                     if wick_size > 0.3 and candle['close'] > key_level + 0.5:
                         rejection_confirmed = True
+
+        # INVALIDATION CHECKS: Only apply if NO confirmation yet
+        # Once retest confirmed by closed candles, keep pattern visible
+        if not rejection_confirmed and not retest_happening:
+            # Time-based expiration (4+ candles without retest)
+            if len(candles_after_breakout) >= 4:
+                return {"detected": False}  # Setup expired - took too long
+
+            # Price ran away without retest (20+ pips above breakout level)
+            if current_price > key_level + 20:
+                return {"detected": False}  # Setup ran away - retest opportunity expired
 
         # Determine state
         if rejection_confirmed:
@@ -1289,11 +1292,8 @@ class BullishProTraderGold:
         # Get the nearest FVG (closest to current price)
         nearest_fvg = min(fvgs_below, key=lambda x: abs(current_price - x["midpoint"]))
 
-        # Check if price is approaching the FVG (within 20 pips)
+        # Calculate distance for state determination
         distance_to_fvg = current_price - nearest_fvg["midpoint"]
-
-        if distance_to_fvg > 20:
-            return {"detected": False}  # Too far away
 
         # PROFESSIONAL RULE: Only check CLOSED H1 candles, not forming candles
         # Check if any recent CLOSED candle touched the FVG zone
@@ -1316,6 +1316,12 @@ class BullishProTraderGold:
                 if wick_size > 3.0 and rejection_distance >= 8.0:
                     strong_rejection = True
                     break
+
+        # Only check proximity if no strong rejection yet
+        # Once closed candle confirms rejection, keep FVG visible regardless of distance
+        if not strong_rejection and not candle_touched_fvg:
+            if distance_to_fvg > 20:
+                return {"detected": False}  # Too far away and no confirmation yet
 
         # Determine state based on CLOSED candle price action only
         last_close = float(candles.iloc[-1]['close'])
