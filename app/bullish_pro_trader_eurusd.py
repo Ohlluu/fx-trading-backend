@@ -2381,6 +2381,8 @@ class BullishProTraderEURUSD:
         liquidity_grab = next((c for c in confluences if c["type"] == "LIQUIDITY_GRAB"), None)
         demand_zone = next((c for c in confluences if c["type"] == "DEMAND_ZONE"), None)
         order_block = next((c for c in confluences if c["type"] == "ORDER_BLOCK"), None)
+        fvg = next((c for c in confluences if c["type"] == "FVG"), None)
+        breakout_retest = next((c for c in confluences if c["type"] == "BREAKOUT_RETEST"), None)
 
         # Get actual liquidity grab low (not from description parsing!)
         liquidity_grab_low = None
@@ -2404,22 +2406,74 @@ class BullishProTraderEURUSD:
             entry_reason = f"Enter at current price ${current_price:.5f}"
 
         # STOP LOSS: Professional methodology
-        # SL goes below the ACTUAL liquidity grab LOW (where stops were swept)
-        # This validates the setup failed if price returns to grab level
+        # OPTION 3: Use closest confluence to entry for SL
+        # All patterns use 6 pip buffer (0.0006 for EUR/USD)
         support_levels = h4_levels.get("support_levels", [])
 
+        confluence_levels = []
+
+        # Collect all confluences with their levels and 6 pip buffers
         if liquidity_grab and liquidity_grab_low:
-            # SL below the liquidity grab low (stops already swept)
-            sl = liquidity_grab_low - 0.0005  # 5 pips below ACTUAL grab low
-            sl_reason = f"Below liquidity grab low (${liquidity_grab_low:.5f}) - stops already swept"
-        elif demand_zone and support_levels:
-            # SL below demand zone (6 pips buffer = 0.0006 for EUR/USD)
-            sl = key_level - 0.0006
-            sl_reason = f"Below demand zone (${key_level:.5f}) with 6 pip buffer"
+            confluence_levels.append({
+                "name": "Liquidity Grab",
+                "level": liquidity_grab_low,
+                "sl": liquidity_grab_low - 0.0006,  # Changed from 0.0005 to 0.0006
+                "reason": f"Below liquidity grab low (${liquidity_grab_low:.5f}) - stops already swept"
+            })
+
+        if demand_zone:
+            confluence_levels.append({
+                "name": "Demand Zone",
+                "level": key_level,
+                "sl": key_level - 0.0006,
+                "reason": f"Below demand zone (${key_level:.5f}) with 6 pip buffer"
+            })
+
+        if order_block:
+            ob_desc = order_block.get("description", "")
+            import re
+            match = re.search(r'\$(\d+\.\d+)-\$(\d+\.\d+)', ob_desc)
+            if match:
+                ob_bottom = float(match.group(1))
+                confluence_levels.append({
+                    "name": "Order Block",
+                    "level": ob_bottom,
+                    "sl": ob_bottom - 0.0006,
+                    "reason": f"Below Order Block bottom (${ob_bottom:.5f}) with 6 pip buffer"
+                })
+
+        if fvg:
+            fvg_level = setup.get("fvg_zone", {}).get("bottom") if "fvg_zone" in setup else None
+            if fvg_level:
+                confluence_levels.append({
+                    "name": "FVG",
+                    "level": fvg_level,
+                    "sl": fvg_level - 0.0006,
+                    "reason": f"Below FVG bottom (${fvg_level:.5f}) with 6 pip buffer"
+                })
+
+        if breakout_retest:
+            breakout_level = breakout_retest.get("key_level") if isinstance(breakout_retest, dict) else key_level
+            if breakout_level:
+                confluence_levels.append({
+                    "name": "Breakout Retest",
+                    "level": breakout_level,
+                    "sl": breakout_level - 0.0006,
+                    "reason": f"Below breakout level (${breakout_level:.5f}) with 6 pip buffer"
+                })
+
+        # Find closest confluence to entry
+        if confluence_levels:
+            for conf in confluence_levels:
+                conf["distance"] = abs(entry - conf["level"])
+
+            closest = min(confluence_levels, key=lambda x: x["distance"])
+            sl = closest["sl"]
+            sl_reason = closest["reason"]
         else:
-            # Default: 15 pips below entry
-            sl = entry - 0.0015
-            sl_reason = "Standard 15 pip stop"
+            # Fallback: 6 pips below entry (changed from 15)
+            sl = entry - 0.0006
+            sl_reason = "6 pip buffer below entry"
 
         # TAKE PROFIT: Professional methodology - target opposing liquidity pools
         # Look for resistance levels (swing highs, psychological levels) above entry

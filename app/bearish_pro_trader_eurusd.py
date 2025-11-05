@@ -2486,6 +2486,8 @@ class BearishProTraderEURUSD:
         liquidity_grab = next((c for c in confluences if c["type"] == "LIQUIDITY_GRAB"), None)
         supply_zone = next((c for c in confluences if c["type"] == "SUPPLY_ZONE"), None)
         order_block = next((c for c in confluences if c["type"] == "ORDER_BLOCK"), None)
+        fvg = next((c for c in confluences if c["type"] == "FVG"), None)
+        breakdown_retest = next((c for c in confluences if c["type"] == "BREAKDOWN_RETEST"), None)
 
         # Get actual liquidity grab high (not from description parsing!)
         liquidity_grab_high = None
@@ -2509,22 +2511,74 @@ class BearishProTraderEURUSD:
             entry_reason = f"Enter at current price ${current_price:.5f}"
 
         # STOP LOSS: Professional methodology (BEARISH)
-        # SL goes above the ACTUAL liquidity grab HIGH (where stops were swept)
-        # This validates the setup failed if price returns to grab level
+        # OPTION 3: Use closest confluence to entry for SL
+        # All patterns use 6 pip buffer (0.0006 for EUR/USD)
         resistance_levels = h4_levels.get("resistance_levels", [])
 
+        confluence_levels = []
+
+        # Collect all confluences with their levels and 6 pip buffers
         if liquidity_grab and liquidity_grab_high:
-            # SL above the liquidity grab high (stops already swept)
-            sl = liquidity_grab_high + 0.0005  # 5 pips above ACTUAL grab high
-            sl_reason = f"Above liquidity grab high (${liquidity_grab_high:.5f}) - stops already swept"
-        elif supply_zone and resistance_levels:
-            # SL above supply zone (6 pips buffer = 0.0006 for EUR/USD)
-            sl = key_level + 0.0006
-            sl_reason = f"Above supply zone (${key_level:.5f}) with 6 pip buffer"
+            confluence_levels.append({
+                "name": "Liquidity Grab",
+                "level": liquidity_grab_high,
+                "sl": liquidity_grab_high + 0.0006,  # Changed from 0.0005 to 0.0006, ABOVE for bearish
+                "reason": f"Above liquidity grab high (${liquidity_grab_high:.5f}) - stops already swept"
+            })
+
+        if supply_zone:
+            confluence_levels.append({
+                "name": "Supply Zone",
+                "level": key_level,
+                "sl": key_level + 0.0006,  # ABOVE for bearish
+                "reason": f"Above supply zone (${key_level:.5f}) with 6 pip buffer"
+            })
+
+        if order_block:
+            ob_desc = order_block.get("description", "")
+            import re
+            match = re.search(r'\$(\d+\.\d+)-\$(\d+\.\d+)', ob_desc)
+            if match:
+                ob_top = float(match.group(2))  # Use top for bearish
+                confluence_levels.append({
+                    "name": "Order Block",
+                    "level": ob_top,
+                    "sl": ob_top + 0.0006,  # ABOVE for bearish
+                    "reason": f"Above Order Block top (${ob_top:.5f}) with 6 pip buffer"
+                })
+
+        if fvg:
+            fvg_level = setup.get("fvg_zone", {}).get("top") if "fvg_zone" in setup else None  # Use top for bearish
+            if fvg_level:
+                confluence_levels.append({
+                    "name": "FVG",
+                    "level": fvg_level,
+                    "sl": fvg_level + 0.0006,  # ABOVE for bearish
+                    "reason": f"Above FVG top (${fvg_level:.5f}) with 6 pip buffer"
+                })
+
+        if breakdown_retest:
+            breakdown_level = breakdown_retest.get("key_level") if isinstance(breakdown_retest, dict) else key_level
+            if breakdown_level:
+                confluence_levels.append({
+                    "name": "Breakdown Retest",
+                    "level": breakdown_level,
+                    "sl": breakdown_level + 0.0006,  # ABOVE for bearish
+                    "reason": f"Above breakdown level (${breakdown_level:.5f}) with 6 pip buffer"
+                })
+
+        # Find closest confluence to entry
+        if confluence_levels:
+            for conf in confluence_levels:
+                conf["distance"] = abs(entry - conf["level"])
+
+            closest = min(confluence_levels, key=lambda x: x["distance"])
+            sl = closest["sl"]
+            sl_reason = closest["reason"]
         else:
-            # Default: 15 pips above entry
-            sl = entry + 0.0015
-            sl_reason = "Standard 15 pip stop"
+            # Fallback: 6 pips above entry (changed from 15)
+            sl = entry + 0.0006
+            sl_reason = "6 pip buffer above entry"
 
         # TAKE PROFIT: Professional methodology - target opposing liquidity pools (BEARISH)
         # Look for support levels (swing lows, psychological levels) below entry
