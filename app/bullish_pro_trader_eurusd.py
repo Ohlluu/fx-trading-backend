@@ -1163,11 +1163,8 @@ class BullishProTraderEURUSD:
         # Find nearest support level
         nearest_support = min(support_levels, key=lambda x: abs(x - current_price))
 
-        # Check if price is within 8 pips of support (tight threshold for real demand zones)
+        # Check price distance for state determination
         distance_to_support = current_price - nearest_support
-
-        if distance_to_support > 0.0008 or distance_to_support < -0.0005:
-            return {"detected": False}  # Too far away or already bounced too much
 
         # PROFESSIONAL RULE: Only check CLOSED H1 candles for zone touches and rejections
         candle_touched_support = False
@@ -1187,6 +1184,12 @@ class BullishProTraderEURUSD:
                     if candle_rejection >= 0.0008:
                         strong_rejection = True
                         break
+
+        # Only check proximity if no strong rejection yet
+        # Once closed candle confirms rejection, keep zone visible regardless of distance
+        if not strong_rejection:
+            if distance_to_support > 0.0008 or distance_to_support < -0.0005:
+                return {"detected": False}  # Too far away and no confirmation yet
 
         # Determine state based on price action
         if candle_touched_support:
