@@ -93,7 +93,8 @@ class BullishProTraderEURUSD:
 
             # CHECK IF SETUP TRIGGERED (5+ confluence)
             # If yes, lock it in as active trade
-            if h1_setup.get("total_score", 0) >= 5:
+            # IMPORTANT: Only create if no active trade exists (don't overwrite locked trades)
+            if h1_setup.get("total_score", 0) >= 5 and self.active_trade is None:
                 trade_plan = self._build_trade_plan(h1_setup, h4_levels, current_price)
                 if trade_plan.get("status") == "Ready":
                     # Save as active trade (in memory AND file)
@@ -1349,9 +1350,9 @@ class BullishProTraderEURUSD:
             "direction": "LONG",
             "state": state,
             "progress": progress,
-            "key_level": nearest_fvg["midpoint"],
+            "key_level": nearest_fvg["bottom"],  # BULLISH: Use bottom (price fills gap from below)
             "confirmations": confirmations,
-            "expected_entry": nearest_fvg["midpoint"],
+            "expected_entry": nearest_fvg["bottom"],  # Entry at bottom of FVG
             "fvg_zone": {
                 "top": nearest_fvg["top"],
                 "bottom": nearest_fvg["bottom"],
