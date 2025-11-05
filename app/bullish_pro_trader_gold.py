@@ -1132,7 +1132,7 @@ class BullishProTraderGold:
             "rejection_confirmed": rejection_confirmed  # Conservative confirmation flag
         }
 
-    def _check_demand_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float, current_candle_low: float = None) -> Dict[str, Any]:
+    def _check_demand_zone(self, candles: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
         """
         Check for DEMAND ZONE pattern (BULLISH):
         - Price approaching H4 SUPPORT level where buyers historically defended
@@ -1140,11 +1140,12 @@ class BullishProTraderGold:
 
         Similar to Order Block but at H4 key levels
 
+        PROFESSIONAL RULE: Only uses CLOSED H1 candles for confirmation
+
         Args:
-            candles: Historical H1 candles
+            candles: Historical H1 candles (closed only)
             h4_levels: H4 support/resistance levels
-            current_price: Current market price
-            current_candle_low: Low of the forming candle (from M5 data)
+            current_price: Current market price (for distance calculation)
         """
         support_levels = h4_levels.get("support_levels", [])
 
@@ -1160,33 +1161,24 @@ class BullishProTraderGold:
         if distance_to_support > 8 or distance_to_support < -5:
             return {"detected": False}  # Too far away or already bounced too much
 
-        # Check if current candle's low touched the support zone (M5 precision)
+        # PROFESSIONAL RULE: Only check CLOSED H1 candles for zone touches and rejections
         candle_touched_support = False
         strong_rejection = False
-        if current_candle_low is not None:
-            # Check if the low of current candle went into or below the support zone
-            if current_candle_low <= nearest_support + 3:  # Within 3 pips of support
-                candle_touched_support = True
 
-                # Check for STRONG REJECTION:
-                # If price touched support and bounced 8+ pips from the touch point (professional standard)
-                rejection_distance = current_price - current_candle_low
-                if rejection_distance >= 8.0:  # 8+ pips = institutional rejection
-                    strong_rejection = True
+        # Check last 3 closed H1 candles for interaction with demand zone
+        if len(candles) >= 3:
+            recent_candles = candles.tail(3)
 
-        # ALSO check MOST RECENT completed H1 candle for strong rejection
-        # Check this regardless of current candle status to capture H1 rejections
-        if len(candles) >= 1:
-            last_candle = candles.tail(1).iloc[0]
+            for idx, candle in recent_candles.iterrows():
+                # Check if candle low touched support (within 3 pips)
+                if candle['low'] <= nearest_support + 3:
+                    candle_touched_support = True
 
-            # Check if candle low touched support (within 3 pips)
-            if last_candle['low'] <= nearest_support + 3:
-                candle_touched_support = True
-
-                # Check if it had strong rejection (8+ pips from low to close)
-                candle_rejection = last_candle['close'] - last_candle['low']
-                if candle_rejection >= 8.0:
-                    strong_rejection = True
+                    # Check if it had strong rejection (8+ pips from low to close)
+                    candle_rejection = candle['close'] - candle['low']
+                    if candle_rejection >= 8.0:
+                        strong_rejection = True
+                        break
 
         # Determine state based on price action
         if candle_touched_support:
