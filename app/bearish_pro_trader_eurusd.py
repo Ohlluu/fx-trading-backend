@@ -717,14 +717,20 @@ class BearishProTraderEURUSD:
             # else: Breakdown detected but retest not happening yet - don't give points
 
         # Add Supply Zone
-        # Pattern shows immediately when detected (professional methodology)
+        # Only give points when zone is ACTUALLY TOUCHED and REJECTED (closed candle confirmation)
         if supply_setup["detected"]:
-            confluences.append({
-                "type": "SUPPLY_ZONE",
-                "score": 2,
-                "description": f"Supply Zone at ${supply_setup.get('key_level', 0):.5f}"
-            })
-            total_score += 2
+            # Check if we have actual touch + rejection confirmation
+            strong_rejection = supply_setup.get("strong_rejection", False)
+
+            # Only give confluence points when zone shows strong rejection
+            if strong_rejection:
+                confluences.append({
+                    "type": "SUPPLY_ZONE",
+                    "score": 2,
+                    "description": f"Supply Zone at ${supply_setup.get('key_level', 0):.5f}"
+                })
+                total_score += 2
+            # else: Zone detected but no strong rejection yet - don't give points
 
         # STEP 4: Determine if we have enough confluence to enter
         if total_score < 5:

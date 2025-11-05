@@ -716,14 +716,20 @@ class BullishProTraderGold:
             # else: Breakout detected but retest not happening yet - don't give points
 
         # Add Demand Zone
-        # TEMPORARILY REMOVED STABILITY CHECK TO DEBUG
+        # Only give points when zone is ACTUALLY TOUCHED and REJECTED (closed candle confirmation)
         if demand_setup["detected"]:
-            confluences.append({
-                "type": "DEMAND_ZONE",
-                "score": 2,
-                "description": f"Demand Zone at ${demand_setup.get('key_level', 0):.2f} (Strong Rejection: {demand_setup.get('strong_rejection', False)})"
-            })
-            total_score += 2
+            # Check if we have actual touch + rejection confirmation
+            strong_rejection = demand_setup.get("strong_rejection", False)
+
+            # Only give confluence points when zone shows strong rejection
+            if strong_rejection:
+                confluences.append({
+                    "type": "DEMAND_ZONE",
+                    "score": 2,
+                    "description": f"Demand Zone at ${demand_setup.get('key_level', 0):.2f} (Strong Rejection: {strong_rejection})"
+                })
+                total_score += 2
+            # else: Zone detected but no strong rejection yet - don't give points
 
         # STEP 4: Determine if we have enough confluence to enter
         if total_score < 5:
