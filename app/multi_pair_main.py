@@ -30,6 +30,7 @@ from .bearish_pro_trader_gold import get_bearish_pro_trader_analysis
 from .bullish_pro_trader_eurusd import get_bullish_pro_trader_analysis as get_bullish_eurusd_analysis
 from .bearish_pro_trader_eurusd import get_bearish_pro_trader_analysis as get_bearish_eurusd_analysis
 from .trade_manager import trade_manager
+from .telegram_notifier import notifier, send_setup_notification
 from pydantic import BaseModel
 
 # Scheduler
@@ -263,6 +264,27 @@ async def analyze_gbpusd(force_refresh: bool = False) -> Dict[str, Any]:
             "data": {"error": f"GBPUSD analysis failed: {str(e)}"}
         }
 
+async def check_and_notify_setups(bullish_data: Dict, bearish_data: Dict):
+    """
+    Check confluence scores and send Telegram notifications if threshold is met
+    Threshold: 7+ points for high-quality setups
+    """
+    threshold = 7  # Minimum score to trigger notification
+
+    try:
+        # Check bullish setup
+        bullish_score = bullish_data.get('total_score', 0)
+        if bullish_score >= threshold:
+            await send_setup_notification("BULLISH", bullish_data)
+
+        # Check bearish setup
+        bearish_score = bearish_data.get('total_score', 0)
+        if bearish_score >= threshold:
+            await send_setup_notification("BEARISH", bearish_data)
+
+    except Exception as e:
+        print(f"⚠️ Notification check error: {e}")
+
 # API ENDPOINTS
 
 @app.get("/api/xauusd/analysis")
@@ -371,6 +393,7 @@ async def get_pro_trader_gold_analysis():
     """
     Get BOTH Bullish and Bearish Professional Trader Gold analysis
     Returns both BUY setups and SELL setups in one response
+    Also checks for high-quality setups and sends Telegram notifications
     """
     try:
         # Run both analyses in parallel
@@ -378,6 +401,9 @@ async def get_pro_trader_gold_analysis():
             get_bullish_pro_trader_analysis(),
             get_bearish_pro_trader_analysis()
         )
+
+        # Check if either setup meets notification threshold (7+ points)
+        await check_and_notify_setups(bullish_result, bearish_result)
 
         return JSONResponse({
             "bullish": bullish_result,
@@ -525,6 +551,11 @@ class ExitTradeRequest(BaseModel):
     position_size: int  # 50 or 100
     reason: str = "Manual Exit"
 
+class TelegramSettingsRequest(BaseModel):
+    chat_id: str
+    bot_token: Optional[str] = None
+    enabled: bool = True
+
 # TRADE MANAGEMENT ENDPOINTS
 @app.post("/api/pro-trader-gold/enter-trade")
 async def enter_trade(request: EnterTradeRequest):
@@ -608,6 +639,79 @@ async def get_trade_history():
     except Exception as e:
         return JSONResponse({
             "status": "error",
+            "error": str(e)
+        }, status_code=500)
+
+# TELEGRAM SETTINGS ENDPOINTS
+@app.post("/api/settings/telegram")
+async def update_telegram_settings(request: TelegramSettingsRequest):
+    """
+    Update Telegram notification settings
+    User provides their chat ID and optionally a bot token
+    """
+    try:
+        # Update notifier settings
+        if request.bot_token:
+            notifier.bot_token = request.bot_token
+            notifier.base_url = f"https://api.telegram.org/bot{request.bot_token}"
+
+        notifier.chat_id = request.chat_id
+
+        # Verify it works by sending a test message
+        if request.enabled:
+            success = await notifier.send_test_message()
+            if not success:
+                return JSONResponse({
+                    "success": False,
+                    "error": "Failed to send test message. Check your chat ID and bot token."
+                }, status_code=400)
+
+        return JSONResponse({
+            "success": True,
+            "message": "Telegram notifications configured successfully!",
+            "chat_id": request.chat_id,
+            "enabled": request.enabled
+        })
+    except Exception as e:
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+@app.get("/api/settings/telegram")
+async def get_telegram_settings():
+    """Get current Telegram notification settings"""
+    return JSONResponse({
+        "configured": notifier.is_configured(),
+        "chat_id": notifier.chat_id if notifier.chat_id else None,
+        "enabled": notifier.is_configured()
+    })
+
+@app.post("/api/settings/telegram/test")
+async def test_telegram_notification():
+    """Send a test notification to verify setup"""
+    try:
+        if not notifier.is_configured():
+            return JSONResponse({
+                "success": False,
+                "error": "Telegram not configured. Please set chat ID first."
+            }, status_code=400)
+
+        success = await notifier.send_test_message()
+
+        if success:
+            return JSONResponse({
+                "success": True,
+                "message": "Test notification sent successfully!"
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "error": "Failed to send test notification. Check your configuration."
+            }, status_code=400)
+    except Exception as e:
+        return JSONResponse({
+            "success": False,
             "error": str(e)
         }, status_code=500)
 
