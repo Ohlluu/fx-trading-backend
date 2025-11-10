@@ -19,21 +19,40 @@ class TelegramNotifier:
         self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
 
-        # Track last notification time to avoid spam
-        self.last_notification_time: Dict[str, datetime] = {}
-        self.cooldown_minutes = 30  # Don't send same alert more than once per 30 min
+        # Track last notified score per direction to avoid spam
+        # Only notify when score increases above last notified score
+        self.last_notified_scores: Dict[str, int] = {
+            "BULLISH": 0,
+            "BEARISH": 0
+        }
 
     def is_configured(self) -> bool:
         """Check if Telegram is properly configured"""
         return bool(self.bot_token and self.chat_id)
 
-    def _should_send_notification(self, alert_key: str) -> bool:
-        """Check if enough time has passed since last notification"""
-        if alert_key not in self.last_notification_time:
+    def _should_send_notification(self, direction: str, current_score: int) -> bool:
+        """
+        Check if we should send notification based on score changes
+
+        Rules:
+        - Notify if score >= 7 (threshold)
+        - AND score > last_notified_score for this direction
+        - Reset tracking if score drops below 7 (allows re-notification when it comes back up)
+        """
+        # Below threshold - reset tracking and don't notify
+        if current_score < 7:
+            self.last_notified_scores[direction] = 0
+            return False
+
+        # Score must be higher than last notification
+        last_score = self.last_notified_scores.get(direction, 0)
+        if current_score > last_score:
+            self.last_notified_scores[direction] = current_score
+            print(f"✅ {direction} score increased: {last_score} → {current_score} - Sending notification")
             return True
 
-        time_since_last = datetime.now() - self.last_notification_time[alert_key]
-        return time_since_last.total_seconds() > (self.cooldown_minutes * 60)
+        print(f"⏳ {direction} score unchanged ({current_score}) - Skipping notification")
+        return False
 
     async def send_message(self, message: str, parse_mode: str = "Markdown") -> bool:
         """Send a message via Telegram Bot API"""
@@ -75,11 +94,8 @@ class TelegramNotifier:
     ) -> bool:
         """Send a formatted confluence alert to Telegram"""
 
-        # Create unique alert key to prevent spam
-        alert_key = f"{direction}_{score}_{current_price:.0f}"
-
-        if not self._should_send_notification(alert_key):
-            print(f"⏳ Cooldown active for {direction} alert - skipping")
+        # Check if we should send notification based on score increase
+        if not self._should_send_notification(direction, score):
             return False
 
         # Format the message
@@ -124,12 +140,7 @@ class TelegramNotifier:
         message += f"\n\n[View Full Analysis](https://fx-trading-web-zcca.vercel.app/pro-trader-gold)"
 
         # Send the notification
-        success = await self.send_message(message)
-
-        if success:
-            self.last_notification_time[alert_key] = datetime.now()
-
-        return success
+        return await self.send_message(message)
 
     async def send_test_message(self) -> bool:
         """Send a test message to verify configuration"""
