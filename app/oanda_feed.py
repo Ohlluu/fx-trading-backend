@@ -139,18 +139,19 @@ async def get_xauusd_candles(count: int = 1000, granularity: str = "H1") -> Opti
         print(f"❌ OANDA candles API error: {e}")
         return None
 
-async def get_forming_candles(granularity: str = "M5", count: int = 20) -> Optional[pd.DataFrame]:
+async def get_forming_candles(instrument: str = "XAU_USD", granularity: str = "M5", count: int = 20) -> Optional[pd.DataFrame]:
     """
     Get recent candles INCLUDING the incomplete/forming candle
     Used to track the current hour's high/low with M5 precision
 
     Args:
+        instrument: OANDA instrument format - "XAU_USD", "EUR_USD", "GBP_USD", etc.
         granularity: OANDA timeframe - "M5", "M15", "H1", etc.
         count: Number of candles to fetch
 
     Returns DataFrame with forming candles included
     """
-    url = f"{OANDA_BASE_URL}/instruments/XAU_USD/candles"
+    url = f"{OANDA_BASE_URL}/instruments/{instrument}/candles"
     headers = {
         "Authorization": f"Bearer {OANDA_API_KEY}",
         "Accept-Datetime-Format": "UNIX"
@@ -205,12 +206,15 @@ async def get_forming_candles(granularity: str = "M5", count: int = 20) -> Optio
         print(f"❌ OANDA forming candles API error: {e}")
         return None
 
-async def get_latest_candle_data() -> Optional[Dict[str, Any]]:
+async def get_latest_candle_data(instrument: str = "XAU_USD") -> Optional[Dict[str, Any]]:
     """
     Get just the latest completed hourly candle
     Returns dict with datetime, OHLC, and volume
+
+    Args:
+        instrument: OANDA instrument format - "XAU_USD", "EUR_USD", "GBP_USD", etc.
     """
-    url = f"{OANDA_BASE_URL}/instruments/XAU_USD/candles"
+    url = f"{OANDA_BASE_URL}/instruments/{instrument}/candles"
     headers = {
         "Authorization": f"Bearer {OANDA_API_KEY}",
         "Accept-Datetime-Format": "UNIX"
