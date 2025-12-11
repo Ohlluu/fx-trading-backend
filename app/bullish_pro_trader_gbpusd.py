@@ -1406,7 +1406,7 @@ class BullishProTraderGBPUSD:
 
             # Fetch 5-minute candles (12 candles per hour * lookback_hours)
             count = 12 * lookback_hours
-            m5_data = await fetch_h1("EURUSD", timeframe="M5")
+            m5_data = await fetch_h1(self.pair, timeframe="M5")
 
             if m5_data is None or m5_data.empty:
                 return False
