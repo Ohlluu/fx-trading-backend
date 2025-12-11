@@ -429,9 +429,14 @@ async def get_eurusd_candles(count: int = 1000, granularity: str = "H1") -> Opti
     """
     return await get_candles_generic("EUR_USD", count, granularity)
 
-async def get_gbpusd_candles(count: int = 1000) -> Optional[pd.DataFrame]:
+async def get_gbpusd_candles(count: int = 1000, granularity: str = "H1") -> Optional[pd.DataFrame]:
     """
-    Get historical GBPUSD hourly candles from OANDA
+    Get historical GBPUSD candles from OANDA with specified granularity
+
+    Args:
+        count: Number of candles to fetch (max 5000)
+        granularity: OANDA timeframe - "D" (daily), "H4" (4-hour), "H1" (1-hour), "M15" (15-min), "M5" (5-min)
+
     Returns DataFrame with columns: time, open, high, low, close, volume
     """
     url = f"{OANDA_BASE_URL}/instruments/GBP_USD/candles"
@@ -440,7 +445,7 @@ async def get_gbpusd_candles(count: int = 1000) -> Optional[pd.DataFrame]:
         "Accept-Datetime-Format": "UNIX"
     }
     params = {
-        "granularity": "H1",  # 1-hour candles
+        "granularity": granularity,  # Dynamic timeframe
         "count": count,
         "price": "M",  # Mid prices
         "includeIncompleteCandles": "false"
