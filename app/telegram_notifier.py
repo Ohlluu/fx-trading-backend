@@ -19,39 +19,46 @@ class TelegramNotifier:
         self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
 
-        # Track last notified score per direction to avoid spam
+        # Track last notified score per pair+direction to avoid spam
+        # Key format: "XAUUSD_BULLISH", "EURUSD_BEARISH", etc.
         # Only notify when score increases above last notified score
-        self.last_notified_scores: Dict[str, int] = {
-            "BULLISH": 0,
-            "BEARISH": 0
-        }
+        self.last_notified_scores: Dict[str, int] = {}
 
     def is_configured(self) -> bool:
         """Check if Telegram is properly configured"""
         return bool(self.bot_token and self.chat_id)
 
-    def _should_send_notification(self, direction: str, current_score: int) -> bool:
+    def _should_send_notification(self, pair: str, direction: str, current_score: int, threshold: int = 6) -> bool:
         """
         Check if we should send notification based on score changes
 
         Rules:
-        - Notify if score >= 7 (threshold)
-        - AND score > last_notified_score for this direction
-        - Reset tracking if score drops below 7 (allows re-notification when it comes back up)
+        - Notify if score >= threshold (default 6)
+        - AND score > last_notified_score for this pair+direction
+        - Reset tracking if score drops below threshold (allows re-notification when it comes back up)
+
+        Args:
+            pair: Trading pair (XAUUSD, EURUSD, GBPUSD)
+            direction: BULLISH or BEARISH
+            current_score: Current confluence score
+            threshold: Minimum score to trigger notification (default 6)
         """
+        # Create unique key for this pair+direction combination
+        key = f"{pair}_{direction}"
+
         # Below threshold - reset tracking and don't notify
-        if current_score < 7:
-            self.last_notified_scores[direction] = 0
+        if current_score < threshold:
+            self.last_notified_scores[key] = 0
             return False
 
         # Score must be higher than last notification
-        last_score = self.last_notified_scores.get(direction, 0)
+        last_score = self.last_notified_scores.get(key, 0)
         if current_score > last_score:
-            self.last_notified_scores[direction] = current_score
-            print(f"✅ {direction} score increased: {last_score} → {current_score} - Sending notification")
+            self.last_notified_scores[key] = current_score
+            print(f"✅ {pair} {direction} score increased: {last_score} → {current_score} - Sending notification")
             return True
 
-        print(f"⏳ {direction} score unchanged ({current_score}) - Skipping notification")
+        print(f"⏳ {pair} {direction} score unchanged ({current_score}) - Skipping notification")
         return False
 
     async def send_message(self, message: str, parse_mode: str = "Markdown") -> bool:
@@ -85,29 +92,44 @@ class TelegramNotifier:
 
     async def send_confluence_alert(
         self,
+        pair: str,  # "XAUUSD", "EURUSD", "GBPUSD"
         direction: str,  # "BULLISH" or "BEARISH"
         score: int,
         confidence: str,
         current_price: float,
         confluences: list,
-        trade_plan: Optional[Dict] = None
+        trade_plan: Optional[Dict] = None,
+        threshold: int = 6
     ) -> bool:
         """Send a formatted confluence alert to Telegram"""
 
         # Check if we should send notification based on score increase
-        if not self._should_send_notification(direction, score):
+        if not self._should_send_notification(pair, direction, score, threshold):
             return False
+
+        # Format pair name for display
+        pair_display = {
+            "XAUUSD": "GOLD",
+            "EURUSD": "EUR/USD",
+            "GBPUSD": "GBP/USD"
+        }.get(pair, pair)
 
         # Format the message
         emoji = "📈" if direction == "BULLISH" else "📉"
         color = "🟢" if direction == "BULLISH" else "🔴"
 
+        # Format price based on pair
+        if pair == "XAUUSD":
+            price_str = f"${current_price:.2f}"
+        else:
+            price_str = f"{current_price:.5f}"
+
         message = f"""
-{emoji} *{direction} GOLD SETUP READY* {color}
+{emoji} *{direction} {pair_display} SETUP READY* {color}
 
 *Confluence Score:* {score} points
 *Confidence:* {confidence}
-*Current Price:* ${current_price:.2f}
+*Current Price:* {price_str}
 
 *Detected Patterns:*
 """
@@ -136,8 +158,14 @@ class TelegramNotifier:
         now = datetime.now().strftime("%I:%M %p UTC")
         message += f"\n⏰ {now}"
 
-        # Add link to dashboard
-        message += f"\n\n[View Full Analysis](https://fx-trading-web-zcca.vercel.app/pro-trader-gold)"
+        # Add link to dashboard (pair-specific)
+        dashboard_urls = {
+            "XAUUSD": "https://fx-trading-web-zcca.vercel.app/pro-trader-gold",
+            "EURUSD": "https://fx-trading-web-zcca.vercel.app/pro-trader-eurusd",
+            "GBPUSD": "https://fx-trading-web-zcca.vercel.app/pro-trader-gbpusd"
+        }
+        dashboard_url = dashboard_urls.get(pair, "https://fx-trading-web-zcca.vercel.app")
+        message += f"\n\n[View Full Analysis]({dashboard_url})"
 
         # Send the notification
         return await self.send_message(message)
@@ -164,15 +192,19 @@ notifier = TelegramNotifier()
 
 
 async def send_setup_notification(
+    pair: str,
     direction: str,
-    setup_data: Dict[str, Any]
+    setup_data: Dict[str, Any],
+    threshold: int = 6
 ) -> bool:
     """
     Send notification for a high-quality setup
 
     Args:
+        pair: Trading pair (XAUUSD, EURUSD, GBPUSD)
         direction: "BULLISH" or "BEARISH"
         setup_data: The complete setup data from pro trader analysis
+        threshold: Minimum score to trigger notification (default 6)
     """
     score = setup_data.get('total_score', 0)
     confidence = setup_data.get('confidence', 'MEDIUM')
@@ -181,10 +213,12 @@ async def send_setup_notification(
     trade_plan = setup_data.get('trade_plan', {})
 
     return await notifier.send_confluence_alert(
+        pair=pair,
         direction=direction,
         score=score,
         confidence=confidence,
         current_price=current_price,
         confluences=confluences,
-        trade_plan=trade_plan
+        trade_plan=trade_plan,
+        threshold=threshold
     )

@@ -266,26 +266,31 @@ async def analyze_gbpusd(force_refresh: bool = False) -> Dict[str, Any]:
             "data": {"error": f"GBPUSD analysis failed: {str(e)}"}
         }
 
-async def check_and_notify_setups(bullish_data: Dict, bearish_data: Dict):
+async def check_and_notify_setups(pair: str, bullish_data: Dict, bearish_data: Dict):
     """
     Check confluence scores and send Telegram notifications if threshold is met
-    Threshold: 7+ points for high-quality setups
+    Threshold: 6+ points for high-quality setups
+
+    Args:
+        pair: Trading pair (XAUUSD, EURUSD, GBPUSD)
+        bullish_data: Bullish trader analysis data
+        bearish_data: Bearish trader analysis data
     """
-    threshold = 7  # Minimum score to trigger notification
+    threshold = 6  # Minimum score to trigger notification
 
     try:
         # Check bullish setup
         bullish_score = bullish_data.get('total_score', 0)
         if bullish_score >= threshold:
-            await send_setup_notification("BULLISH", bullish_data)
+            await send_setup_notification(pair, "BULLISH", bullish_data, threshold)
 
         # Check bearish setup
         bearish_score = bearish_data.get('total_score', 0)
         if bearish_score >= threshold:
-            await send_setup_notification("BEARISH", bearish_data)
+            await send_setup_notification(pair, "BEARISH", bearish_data, threshold)
 
     except Exception as e:
-        print(f"⚠️ Notification check error: {e}")
+        print(f"⚠️ {pair} Notification check error: {e}")
 
 # API ENDPOINTS
 
@@ -404,8 +409,8 @@ async def get_pro_trader_gold_analysis():
             get_bearish_pro_trader_analysis()
         )
 
-        # Check if either setup meets notification threshold (7+ points)
-        await check_and_notify_setups(bullish_result, bearish_result)
+        # Check if either setup meets notification threshold (6+ points)
+        await check_and_notify_setups("XAUUSD", bullish_result, bearish_result)
 
         return JSONResponse({
             "bullish": bullish_result,
@@ -472,6 +477,7 @@ async def get_pro_trader_eurusd_analysis():
     """
     Get BOTH Bullish and Bearish Professional Trader EUR/USD analysis
     Returns both BUY setups and SELL setups in one response
+    Also checks for high-quality setups and sends Telegram notifications
     """
     try:
         # Run both analyses in parallel
@@ -479,6 +485,9 @@ async def get_pro_trader_eurusd_analysis():
             get_bullish_eurusd_analysis(),
             get_bearish_eurusd_analysis()
         )
+
+        # Check if either setup meets notification threshold (6+ points)
+        await check_and_notify_setups("EURUSD", bullish_result, bearish_result)
 
         return JSONResponse({
             "bullish": bullish_result,
@@ -545,6 +554,7 @@ async def get_pro_trader_gbpusd_analysis():
     """
     Get BOTH Bullish and Bearish Professional Trader GBP/USD analysis
     Returns both BUY setups and SELL setups in one response
+    Also checks for high-quality setups and sends Telegram notifications
     """
     try:
         # Run both analyses in parallel
@@ -552,6 +562,9 @@ async def get_pro_trader_gbpusd_analysis():
             get_bullish_gbpusd_analysis(),
             get_bearish_gbpusd_analysis()
         )
+
+        # Check if either setup meets notification threshold (6+ points)
+        await check_and_notify_setups("GBPUSD", bullish_result, bearish_result)
 
         return JSONResponse({
             "bullish": bullish_result,
