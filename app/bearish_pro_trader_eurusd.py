@@ -25,6 +25,7 @@ class BearishProTraderEURUSD:
 
     def __init__(self):
         self.pair = "EURUSD"
+        self.pip_size = 0.0001  # EUR/USD: 1 pip = 0.0001 (4th decimal)
         self.timeframes = {
             "D1": 200,  # 200 days
             "H4": 500,  # ~83 days of 4H candles (approx 83 days * 6 candles/day)
@@ -49,6 +50,10 @@ class BearishProTraderEURUSD:
         # PERSISTED to file system so it survives across API calls
         self.active_trade_file = "/tmp/active_trade_bearish_eurusd.json"
         self.active_trade = None  # {"setup": {...}, "trade_plan": {...}, "triggered_at": timestamp, "entry": price}
+
+    def _to_pips(self, price_diff: float) -> float:
+        """Convert price difference to pips (e.g., 0.0005 -> 5.0 pips)"""
+        return abs(price_diff) / self.pip_size
 
     async def get_detailed_setup(self) -> Dict[str, Any]:
         """
@@ -482,39 +487,47 @@ class BearishProTraderEURUSD:
                     wick_size = current_candle_high - current_price
                     pips_above_swing = current_candle_high - swing_level
 
+                    # Convert to pips for EUR/USD
+                    wick_size_pips = self._to_pips(wick_size)
+                    pips_above_swing_pips = self._to_pips(pips_above_swing)
+
                     # Liquidity grab requirements (real-time):
                     # 1. Wick extends 5+ pips above swing level
                     # 2. Strong rejection (wick 8+ pips)
                     # 3. Price currently back below swing level
-                    if pips_above_swing >= 5.0 and wick_size >= 8.0 and current_price < swing_level:
+                    if pips_above_swing_pips >= 5.0 and wick_size_pips >= 8.0 and current_price < swing_level:
                         # LIVE GRAB SCORE (4 points) - same as bullish to prevent single-pattern trades
                         return {
                             "detected": True,
                             "score": 4,
                             "grab_level": swing_level,
                             "grab_high": current_candle_high,
-                            "rejection_size": round(wick_size, 1),
-                            "pips_above": round(pips_above_swing, 1),
-                            "description": f"🔥 LIVE Liquidity Grab at ${swing_level:.5f}! Price spiking to ${current_candle_high:.5f} ({pips_above_swing:.1f} pips above) rejecting {wick_size:.1f} pips DOWN NOW!"
+                            "rejection_size": round(wick_size_pips, 1),
+                            "pips_above": round(pips_above_swing_pips, 1),
+                            "description": f"🔥 LIVE Liquidity Grab at ${swing_level:.5f}! Price spiking to ${current_candle_high:.5f} ({pips_above_swing_pips:.1f} pips above) rejecting {wick_size_pips:.1f} pips DOWN NOW!"
                         }
 
             # Also check H4 resistance levels for current candle grabs
             resistance_levels = h4_levels.get("resistance_levels", [])
             for resistance in resistance_levels:
-                if abs(resistance - current_price) < 30:
+                if abs(resistance - current_price) < 0.0030:  # Within 30 pips for EUR/USD
                     if current_candle_high > resistance:
                         wick_size = current_candle_high - current_price
                         pips_above = current_candle_high - resistance
 
-                        if pips_above >= 5.0 and wick_size >= 8.0 and current_price < resistance:
+                        # Convert to pips
+                        wick_size_pips = self._to_pips(wick_size)
+                        pips_above_pips = self._to_pips(pips_above)
+
+                        if pips_above_pips >= 5.0 and wick_size_pips >= 8.0 and current_price < resistance:
                             return {
                                 "detected": True,
                                 "score": 4,
                                 "grab_level": resistance,
                                 "grab_high": current_candle_high,
-                                "rejection_size": round(wick_size, 1),
-                                "pips_above": round(pips_above, 1),
-                                "description": f"🔥 LIVE Liquidity Grab at H4 resistance ${resistance:.5f}! Price spiking to ${current_candle_high:.5f} rejecting {wick_size:.1f} pips DOWN NOW!"
+                                "rejection_size": round(wick_size_pips, 1),
+                                "pips_above": round(pips_above_pips, 1),
+                                "description": f"🔥 LIVE Liquidity Grab at H4 resistance ${resistance:.5f}! Price spiking to ${current_candle_high:.5f} rejecting {wick_size_pips:.1f} pips DOWN NOW!"
                             }
 
         # PRIORITY 2: Check last 2 CLOSED candles for liquidity grab pattern
@@ -537,8 +550,12 @@ class BearishProTraderEURUSD:
 
                     pips_above_swing = candle['high'] - swing_level
 
+                    # Convert to pips
+                    wick_size_pips = self._to_pips(wick_size)
+                    pips_above_swing_pips = self._to_pips(pips_above_swing)
+
                     # Professional thresholds: 5+ pips spike, 8+ pips rejection (institutional moves)
-                    if pips_above_swing >= 5.0 and wick_size >= 8.0 and candle['close'] < swing_level:
+                    if pips_above_swing_pips >= 5.0 and wick_size_pips >= 8.0 and candle['close'] < swing_level:
                         # Score based on recency
                         # candle_position: 0 = 2 candles ago, 1 = last candle
                         score = 4 if candle_position == 1 else 3
@@ -550,22 +567,26 @@ class BearishProTraderEURUSD:
                             "score": score,
                             "grab_level": swing_level,
                             "grab_high": float(candle['high']),
-                            "rejection_size": round(wick_size, 1),
-                            "pips_above": round(pips_above_swing, 1),
-                            "description": f"🔥 Liquidity Grab at ${swing_level:.5f}! Price spiked to ${candle['high']:.5f} ({pips_above_swing:.1f} pips above) then rejected {wick_size:.1f} pips DOWN - {freshness}"
+                            "rejection_size": round(wick_size_pips, 1),
+                            "pips_above": round(pips_above_swing_pips, 1),
+                            "description": f"🔥 Liquidity Grab at ${swing_level:.5f}! Price spiked to ${candle['high']:.5f} ({pips_above_swing_pips:.1f} pips above) then rejected {wick_size_pips:.1f} pips DOWN - {freshness}"
                         }
 
         # Also check H4 resistance levels for liquidity grabs (last 2 candles only)
         resistance_levels = h4_levels.get("resistance_levels", [])
         for resistance in resistance_levels:
-            if abs(resistance - current_price) < 30:  # Only check nearby levels
+            if abs(resistance - current_price) < 0.0030:  # Within 30 pips for EUR/USD
                 for candle_position, (idx, candle) in enumerate(last_2.iterrows()):
                     if candle['high'] > resistance:
                         wick_size = candle['high'] - candle['close']
                         pips_above = candle['high'] - resistance
 
+                        # Convert to pips
+                        wick_size_pips = self._to_pips(wick_size)
+                        pips_above_pips = self._to_pips(pips_above)
+
                         # Professional thresholds: 5+ pips spike, 8+ pips rejection
-                        if pips_above >= 5.0 and wick_size >= 8.0 and candle['close'] < resistance:
+                        if pips_above_pips >= 5.0 and wick_size_pips >= 8.0 and candle['close'] < resistance:
                             # Score based on recency
                             score = 4 if candle_position == 1 else 3
                             freshness = "FRESH (last candle)" if candle_position == 1 else "RECENT (2 candles ago)"
@@ -575,9 +596,9 @@ class BearishProTraderEURUSD:
                                 "score": score,
                                 "grab_level": resistance,
                                 "grab_high": float(candle['high']),
-                                "rejection_size": round(wick_size, 1),
-                                "pips_above": round(pips_above, 1),
-                                "description": f"🔥 Liquidity Grab at H4 resistance ${resistance:.5f}! Price spiked to ${candle['high']:.5f} then rejected {wick_size:.1f} pips - {freshness}"
+                                "rejection_size": round(wick_size_pips, 1),
+                                "pips_above": round(pips_above_pips, 1),
+                                "description": f"🔥 Liquidity Grab at H4 resistance ${resistance:.5f}! Price spiked to ${candle['high']:.5f} then rejected {wick_size_pips:.1f} pips - {freshness}"
                             }
 
         return {"detected": False, "score": 0}
