@@ -1671,7 +1671,7 @@ class BullishProTraderGBPUSD:
         # Get REAL high/low from M5 candles of current hour (including forming candles)
         try:
             from .oanda_feed import get_forming_candles
-            m5_data = await get_forming_candles(instrument="EUR_USD", granularity="M5", count=20)
+            m5_data = await get_forming_candles(instrument="GBP_USD", granularity="M5", count=20)
 
             if m5_data is not None and not m5_data.empty:
                 # Filter M5 candles to only include those from current hour (>= current_hour_start_utc)
