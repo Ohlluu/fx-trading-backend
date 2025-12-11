@@ -230,7 +230,7 @@ class BearishProTraderGold:
 
         # Get update times (convert to Chicago timezone for display)
         chicago_tz = pytz.timezone('America/Chicago')
-        last_updated = mtf_cache.get_last_update("D1")
+        last_updated = mtf_cache.get_last_update(f"{self.pair}_D1")
         next_update = mtf_cache.get_next_update("D1")
 
         # Convert last_updated to Chicago time for display
@@ -324,7 +324,7 @@ class BearishProTraderGold:
 
         # Get update times (convert to Chicago timezone for display)
         chicago_tz = pytz.timezone('America/Chicago')
-        last_updated = mtf_cache.get_last_update("H4")
+        last_updated = mtf_cache.get_last_update(f"{self.pair}_H4")
         next_update = mtf_cache.get_next_update("H4")
 
         # Convert last_updated to Chicago time for display

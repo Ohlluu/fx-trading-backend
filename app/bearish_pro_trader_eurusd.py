@@ -235,7 +235,7 @@ class BearishProTraderEURUSD:
 
         # Get update times (convert to Chicago timezone for display)
         chicago_tz = pytz.timezone('America/Chicago')
-        last_updated = mtf_cache.get_last_update("D1")
+        last_updated = mtf_cache.get_last_update(f"{self.pair}_D1")
         next_update = mtf_cache.get_next_update("D1")
 
         # Convert last_updated to Chicago time for display
@@ -246,11 +246,11 @@ class BearishProTraderEURUSD:
 
         return {
             "trend": trend,
-            "explanation": f"Price is {'above' if trend == 'BULLISH' else 'below'} 200-day EMA (${ema_200_current:.5f})",
+            "explanation": f"Price is {'above' if trend == 'BULLISH' else 'below'} 200-day EMA ({ema_200_current:.5f})",
             "points": [
-                f"Trend: {trend} (current: ${current_price:.5f} vs 200 EMA: ${ema_200_current:.5f})",
-                f"Recent high: ${recent_high:.5f} ({days_since_high} days ago)",
-                f"Recent low: ${recent_low:.5f} ({days_since_low} days ago)",
+                f"Trend: {trend} (current: {current_price:.5f} vs 200 EMA: {ema_200_current:.5f})",
+                f"Recent high: {recent_high:.5f} ({days_since_high} days ago)",
+                f"Recent low: {recent_low:.5f} ({days_since_low} days ago)",
                 f"Structure: {structure}"
             ],
             "last_updated": last_updated_str,
@@ -330,7 +330,7 @@ class BearishProTraderEURUSD:
 
         # Get update times (convert to Chicago timezone for display)
         chicago_tz = pytz.timezone('America/Chicago')
-        last_updated = mtf_cache.get_last_update("H4")
+        last_updated = mtf_cache.get_last_update(f"{self.pair}_H4")
         next_update = mtf_cache.get_next_update("H4")
 
         # Convert last_updated to Chicago time for display
@@ -408,7 +408,7 @@ class BearishProTraderEURUSD:
                         "structure_type": "BEARISH_BOS",
                         "score": 2,
                         "swing_level": latest_swing_low,
-                        "description": f"Bearish BOS detected! Price closed below swing low at ${latest_swing_low:.5f}"
+                        "description": f"Bearish BOS detected! Price closed below swing low at {latest_swing_low:.5f}"
                     }
 
         # Check for BULLISH CHoCH (close above previous lower high)
@@ -425,7 +425,7 @@ class BearishProTraderEURUSD:
                             "structure_type": "BULLISH_CHOCH",
                             "score": -3,  # Negative score = filter out bearish setups
                             "swing_level": latest_lower_high,
-                            "description": f"⚠️ Bullish CHoCH! Price broke above lower high at ${latest_lower_high:.5f} - Trend may be reversing"
+                            "description": f"⚠️ Bullish CHoCH! Price broke above lower high at {latest_lower_high:.5f} - Trend may be reversing"
                         }
 
         return {"structure_type": "NEUTRAL", "score": 0, "swing_level": None}
@@ -504,7 +504,7 @@ class BearishProTraderEURUSD:
                             "grab_high": current_candle_high,
                             "rejection_size": round(wick_size_pips, 1),
                             "pips_above": round(pips_above_swing_pips, 1),
-                            "description": f"🔥 LIVE Liquidity Grab at ${swing_level:.5f}! Price spiking to ${current_candle_high:.5f} ({pips_above_swing_pips:.1f} pips above) rejecting {wick_size_pips:.1f} pips DOWN NOW!"
+                            "description": f"🔥 LIVE Liquidity Grab at {swing_level:.5f}! Price spiking to {current_candle_high:.5f} ({pips_above_swing_pips:.1f} pips above) rejecting {wick_size_pips:.1f} pips DOWN NOW!"
                         }
 
             # Also check H4 resistance levels for current candle grabs
@@ -527,7 +527,7 @@ class BearishProTraderEURUSD:
                                 "grab_high": current_candle_high,
                                 "rejection_size": round(wick_size_pips, 1),
                                 "pips_above": round(pips_above_pips, 1),
-                                "description": f"🔥 LIVE Liquidity Grab at H4 resistance ${resistance:.5f}! Price spiking to ${current_candle_high:.5f} rejecting {wick_size_pips:.1f} pips DOWN NOW!"
+                                "description": f"🔥 LIVE Liquidity Grab at H4 resistance {resistance:.5f}! Price spiking to {current_candle_high:.5f} rejecting {wick_size_pips:.1f} pips DOWN NOW!"
                             }
 
         # PRIORITY 2: Check last 2 CLOSED candles for liquidity grab pattern
@@ -569,7 +569,7 @@ class BearishProTraderEURUSD:
                             "grab_high": float(candle['high']),
                             "rejection_size": round(wick_size_pips, 1),
                             "pips_above": round(pips_above_swing_pips, 1),
-                            "description": f"🔥 Liquidity Grab at ${swing_level:.5f}! Price spiked to ${candle['high']:.5f} ({pips_above_swing_pips:.1f} pips above) then rejected {wick_size_pips:.1f} pips DOWN - {freshness}"
+                            "description": f"🔥 Liquidity Grab at {swing_level:.5f}! Price spiked to {candle['high']:.5f} ({pips_above_swing_pips:.1f} pips above) then rejected {wick_size_pips:.1f} pips DOWN - {freshness}"
                         }
 
         # Also check H4 resistance levels for liquidity grabs (last 2 candles only)
@@ -598,7 +598,7 @@ class BearishProTraderEURUSD:
                                 "grab_high": float(candle['high']),
                                 "rejection_size": round(wick_size_pips, 1),
                                 "pips_above": round(pips_above_pips, 1),
-                                "description": f"🔥 Liquidity Grab at H4 resistance ${resistance:.5f}! Price spiked to ${candle['high']:.5f} then rejected {wick_size_pips:.1f} pips - {freshness}"
+                                "description": f"🔥 Liquidity Grab at H4 resistance {resistance:.5f}! Price spiked to {candle['high']:.5f} then rejected {wick_size_pips:.1f} pips - {freshness}"
                             }
 
         return {"detected": False, "score": 0}
@@ -696,7 +696,7 @@ class BearishProTraderEURUSD:
                 confluences.append({
                     "type": "FVG",
                     "score": 3,
-                    "description": f"FVG at ${fvg_setup.get('fvg_zone', {}).get('midpoint', 0):.5f}"
+                    "description": f"FVG at {fvg_setup.get('fvg_zone', {}).get('midpoint', 0):.5f}"
                 })
                 total_score += 3
             # else: FVG detected but price not there yet - don't give points
@@ -721,7 +721,7 @@ class BearishProTraderEURUSD:
                 confluences.append({
                     "type": "ORDER_BLOCK",
                     "score": 3,
-                    "description": f"Order Block at ${ob_zone.get('midpoint', 0):.5f} (${ob_bottom:.5f}-${ob_top:.5f})"
+                    "description": f"Order Block at {ob_zone.get('midpoint', 0):.5f} ({ob_bottom:.5f}-{ob_top:.5f})"
                 })
                 total_score += 3
 
@@ -736,7 +736,7 @@ class BearishProTraderEURUSD:
                 confluences.append({
                     "type": "BREAKDOWN_RETEST",
                     "score": 2,
-                    "description": f"Breakdown Retest at ${breakdown_setup.get('key_level', 0):.5f}"
+                    "description": f"Breakdown Retest at {breakdown_setup.get('key_level', 0):.5f}"
                 })
                 total_score += 2
             # else: Breakdown detected but retest not happening yet - don't give points
@@ -752,7 +752,7 @@ class BearishProTraderEURUSD:
                 confluences.append({
                     "type": "SUPPLY_ZONE",
                     "score": 2,
-                    "description": f"Supply Zone at ${supply_setup.get('key_level', 0):.5f}"
+                    "description": f"Supply Zone at {supply_setup.get('key_level', 0):.5f}"
                 })
                 total_score += 2
             # else: Zone detected but no strong rejection yet - don't give points
@@ -1672,8 +1672,8 @@ class BearishProTraderEURUSD:
         steps.append({
             "step": 1,
             "status": "complete",
-            "title": f"Price broke above ${key_level:.5f} resistance",
-            "details": f"Confirmed at {breakout_candle['time']} (1H candle closed at ${breakout_candle['price']:.5f})",
+            "title": f"Price broke above {key_level:.5f} resistance",
+            "details": f"Confirmed at {breakout_candle['time']} (1H candle closed at {breakout_candle['price']:.5f})",
             "explanation": "This shows strong buying pressure. The level that was resistance is now support."
         })
 
@@ -1682,16 +1682,16 @@ class BearishProTraderEURUSD:
             steps.append({
                 "step": 2,
                 "status": "complete",
-                "title": f"Price pulled back to test ${key_level:.5f}",
-                "details": f"Retest happening now at ${retest_candle['price']:.5f}",
+                "title": f"Price pulled back to test {key_level:.5f}",
+                "details": f"Retest happening now at {retest_candle['price']:.5f}",
                 "explanation": "Healthy pullback. Professional traders use this to enter at better price."
             })
         else:
             steps.append({
                 "step": 2,
                 "status": "waiting",
-                "title": f"WAITING for pullback to ${key_level:.5f}",
-                "details": f"Current: ${current_price:.5f} ({current_price - key_level:.5f} pips above)",
+                "title": f"WAITING for pullback to {key_level:.5f}",
+                "details": f"Current: {current_price:.5f} ({current_price - key_level:.5f} pips above)",
                 "explanation": "Waiting for price to dip back down. This creates the 'retest' opportunity."
             })
             return steps
@@ -1712,27 +1712,27 @@ class BearishProTraderEURUSD:
                     "title": "⏳ WATCHING CURRENT CANDLE for rejection",
                     "details": f"Candle: {current_candle['candle_start']} ({minutes_elapsed}/60 mins complete)",
                     "current_values": {
-                        "low": f"${current_candle['low']:.5f}",
-                        "current_price": f"${current_price:.5f}",
-                        "target_level": f"${key_level:.5f}"
+                        "low": f"{current_candle['low']:.5f}",
+                        "current_price": f"{current_price:.5f}",
+                        "target_level": f"{key_level:.5f}"
                     },
                     "watching_for": {
                         "wick_requirement": {
                             "status": "✅ Complete" if wick_touched else "⏳ Waiting",
-                            "text": f"Wick must touch ${key_level:.5f} (support)",
-                            "current": f"Low: ${current_candle['low']:.5f}",
+                            "text": f"Wick must touch {key_level:.5f} (support)",
+                            "current": f"Low: {current_candle['low']:.5f}",
                             "explanation": "The wick shows sellers tried to push lower but failed."
                         },
                         "holding_requirement": {
                             "status": "✅ Complete" if (wick_touched and minutes_elapsed >= 20) else "⏳ Waiting",
-                            "text": f"Price holding above ${key_level + 0.0005:.5f} for 20+ minutes",
-                            "current": f"Currently: ${current_price:.5f} ({minutes_elapsed} mins elapsed)",
+                            "text": f"Price holding above {key_level + 0.0005:.5f} for 20+ minutes",
+                            "current": f"Currently: {current_price:.5f} ({minutes_elapsed} mins elapsed)",
                             "explanation": "Price holding strong shows buyers are in control."
                         },
                         "close_requirement": {
                             "status": "⏳ Watching",
-                            "text": f"Candle must close above ${key_level + 0.0005:.5f}",
-                            "current": f"Currently: ${current_price:.5f}",
+                            "text": f"Candle must close above {key_level + 0.0005:.5f}",
+                            "current": f"Currently: {current_price:.5f}",
                             "time_left": f"{current_candle['time_remaining']} minutes until close",
                             "explanation": "Close above confirms buyers won the battle."
                         }
@@ -1742,9 +1742,9 @@ class BearishProTraderEURUSD:
                             "available": early_entry_available,
                             "type": "🟡 EARLY ENTRY (50% Position)",
                             "status": "AVAILABLE NOW" if early_entry_available else "NOT READY",
-                            "trigger": f"Wick touched + holding above ${key_level + 0.0005:.5f} for 20+ mins",
-                            "entry_price": f"${current_price:.5f} (market order)",
-                            "stop_loss": f"${key_level - 0.0005:.5f}",
+                            "trigger": f"Wick touched + holding above {key_level + 0.0005:.5f} for 20+ mins",
+                            "entry_price": f"{current_price:.5f} (market order)",
+                            "stop_loss": f"{key_level - 0.0005:.5f}",
                             "position_size": "50% of planned trade",
                             "pros": "✓ Catch more of the move\n✓ Better average entry price\n✓ Psychological confidence",
                             "cons": "⚠ Candle could still reverse\n⚠ {0} mins until confirmation".format(current_candle['time_remaining']),
@@ -1752,10 +1752,10 @@ class BearishProTraderEURUSD:
                         },
                         "confirmation_entry": {
                             "type": "🟢 CONFIRMATION ENTRY (Add 50% More)",
-                            "trigger": f"Candle closes above ${key_level + 0.0005:.5f}",
+                            "trigger": f"Candle closes above {key_level + 0.0005:.5f}",
                             "expected_time": current_candle['candle_close_expected'],
                             "time_remaining": f"{current_candle['time_remaining']} minutes",
-                            "entry_price": f"~${current_price + 0.0002:.5f}-${current_price + 0.0005:.5f} (estimated)",
+                            "entry_price": f"~{current_price + 0.0002:.5f}-{current_price + 0.0005:.5f} (estimated)",
                             "position_size": "Add remaining 50%",
                             "pros": "✓ Fully confirmed setup\n✓ High confidence\n✓ Clear invalidation",
                             "cons": "⚠ Slightly worse price\n⚠ Might miss fast moves",
@@ -1770,7 +1770,7 @@ class BearishProTraderEURUSD:
                     "step": 3,
                     "status": "complete",
                     "title": "✅ Rejection candle confirmed",
-                    "details": f"Wick touched ${current_candle['low']:.5f}, closed bullish",
+                    "details": f"Wick touched {current_candle['low']:.5f}, closed bullish",
                     "explanation": "Perfect rejection! Buyers defended support. High probability setup forming."
                 })
 
@@ -1783,7 +1783,7 @@ class BearishProTraderEURUSD:
                     "title": "WAITING for confirmation candle",
                     "details": f"Next candle starts at {current_candle['candle_close_expected']}",
                     "requirements": [
-                        {"text": f"Close above ${key_level + 0.0010:.5f}", "explanation": "Shows momentum continuing"},
+                        {"text": f"Close above {key_level + 0.0010:.5f}", "explanation": "Shows momentum continuing"},
                         {"text": "Green/bullish candle", "explanation": "Buyers in control"},
                         {"text": "No large rejection wick", "explanation": "No heavy selling"}
                     ],
@@ -1807,14 +1807,14 @@ class BearishProTraderEURUSD:
                 "entry_options": [
                     {
                         "type": "Option A: Wait for 3rd bullish candle",
-                        "trigger": f"When next 1H candle closes above ${current_price:.5f}",
+                        "trigger": f"When next 1H candle closes above {current_price:.5f}",
                         "current_count": f"{setup['confirmations']}/3 complete",
                         "pros": "Safest - most confirmation",
                         "cons": "Might miss some entry price"
                     },
                     {
                         "type": "Option B: Enter now (market order)",
-                        "trigger": f"Enter at current price: ${current_price:.5f}",
+                        "trigger": f"Enter at current price: {current_price:.5f}",
                         "pros": "Catch current price level",
                         "cons": "Less confirmation"
                     }
@@ -1840,8 +1840,8 @@ class BearishProTraderEURUSD:
         steps.append({
             "step": 1,
             "status": "complete",
-            "title": f"Price broke BELOW ${key_level:.5f} support",
-            "details": f"Confirmed at {breakdown_candle['time']} (1H candle closed at ${breakdown_candle['price']:.5f})",
+            "title": f"Price broke BELOW {key_level:.5f} support",
+            "details": f"Confirmed at {breakdown_candle['time']} (1H candle closed at {breakdown_candle['price']:.5f})",
             "explanation": "This shows strong selling pressure. The level that was support is now resistance."
         })
 
@@ -1850,16 +1850,16 @@ class BearishProTraderEURUSD:
             steps.append({
                 "step": 2,
                 "status": "complete",
-                "title": f"Price pulled back UP to test ${key_level:.5f}",
-                "details": f"Retest happening now at ${retest_candle['price']:.5f}",
+                "title": f"Price pulled back UP to test {key_level:.5f}",
+                "details": f"Retest happening now at {retest_candle['price']:.5f}",
                 "explanation": "Healthy pullback. Professional traders use this to enter SHORT at better price."
             })
         else:
             steps.append({
                 "step": 2,
                 "status": "waiting",
-                "title": f"WAITING for pullback UP to ${key_level:.5f}",
-                "details": f"Current: ${current_price:.5f} ({key_level - current_price:.5f} pips below)",
+                "title": f"WAITING for pullback UP to {key_level:.5f}",
+                "details": f"Current: {current_price:.5f} ({key_level - current_price:.5f} pips below)",
                 "explanation": "Waiting for price to bounce back up. This creates the 'retest' opportunity."
             })
             return steps
@@ -1880,27 +1880,27 @@ class BearishProTraderEURUSD:
                     "title": "⏳ WATCHING CURRENT CANDLE for bearish rejection",
                     "details": f"Candle: {current_candle['candle_start']} ({minutes_elapsed}/60 mins complete)",
                     "current_values": {
-                        "high": f"${current_candle['high']:.5f}",
-                        "current_price": f"${current_price:.5f}",
-                        "target_level": f"${key_level:.5f}"
+                        "high": f"{current_candle['high']:.5f}",
+                        "current_price": f"{current_price:.5f}",
+                        "target_level": f"{key_level:.5f}"
                     },
                     "watching_for": {
                         "wick_requirement": {
                             "status": "✅ Complete" if wick_touched else "⏳ Waiting",
-                            "text": f"Wick must touch ${key_level:.5f} (resistance)",
-                            "current": f"High: ${current_candle['high']:.5f}",
+                            "text": f"Wick must touch {key_level:.5f} (resistance)",
+                            "current": f"High: {current_candle['high']:.5f}",
                             "explanation": "The wick shows buyers tried to push higher but failed."
                         },
                         "holding_requirement": {
                             "status": "✅ Complete" if (wick_touched and minutes_elapsed >= 20) else "⏳ Waiting",
-                            "text": f"Price holding BELOW ${key_level - 0.0005:.5f} for 20+ minutes",
-                            "current": f"Currently: ${current_price:.5f} ({minutes_elapsed} mins elapsed)",
+                            "text": f"Price holding BELOW {key_level - 0.0005:.5f} for 20+ minutes",
+                            "current": f"Currently: {current_price:.5f} ({minutes_elapsed} mins elapsed)",
                             "explanation": "Price staying weak shows sellers are in control."
                         },
                         "close_requirement": {
                             "status": "⏳ Watching",
-                            "text": f"Candle must close BELOW ${key_level - 0.0005:.5f}",
-                            "current": f"Currently: ${current_price:.5f}",
+                            "text": f"Candle must close BELOW {key_level - 0.0005:.5f}",
+                            "current": f"Currently: {current_price:.5f}",
                             "time_left": f"{current_candle['time_remaining']} minutes until close",
                             "explanation": "Close below confirms sellers won the battle."
                         }
@@ -1910,9 +1910,9 @@ class BearishProTraderEURUSD:
                             "available": early_entry_available,
                             "type": "🟡 EARLY ENTRY (50% Position)",
                             "status": "AVAILABLE NOW" if early_entry_available else "NOT READY",
-                            "trigger": f"Wick touched + holding BELOW ${key_level - 0.0005:.5f} for 20+ mins",
-                            "entry_price": f"${current_price:.5f} (market order SHORT)",
-                            "stop_loss": f"${key_level + 0.0005:.5f}",
+                            "trigger": f"Wick touched + holding BELOW {key_level - 0.0005:.5f} for 20+ mins",
+                            "entry_price": f"{current_price:.5f} (market order SHORT)",
+                            "stop_loss": f"{key_level + 0.0005:.5f}",
                             "position_size": "50% of planned trade",
                             "pros": "✓ Catch more of the move DOWN\n✓ Better average entry price\n✓ Psychological confidence",
                             "cons": "⚠ Candle could still reverse UP\n⚠ {0} mins until confirmation".format(current_candle['time_remaining']),
@@ -1920,10 +1920,10 @@ class BearishProTraderEURUSD:
                         },
                         "confirmation_entry": {
                             "type": "🟢 CONFIRMATION ENTRY (Add 50% More)",
-                            "trigger": f"Candle closes BELOW ${key_level - 0.0005:.5f}",
+                            "trigger": f"Candle closes BELOW {key_level - 0.0005:.5f}",
                             "expected_time": current_candle['candle_close_expected'],
                             "time_remaining": f"{current_candle['time_remaining']} minutes",
-                            "entry_price": f"~${current_price - 0.0002:.5f}-${current_price - 0.0005:.5f} (estimated)",
+                            "entry_price": f"~{current_price - 0.0002:.5f}-{current_price - 0.0005:.5f} (estimated)",
                             "position_size": "Add remaining 50% SHORT",
                             "pros": "✓ Fully confirmed setup\n✓ High confidence\n✓ Clear invalidation",
                             "cons": "⚠ Slightly worse price\n⚠ Might miss fast moves",
@@ -1938,7 +1938,7 @@ class BearishProTraderEURUSD:
                     "step": 3,
                     "status": "complete",
                     "title": "✅ Bearish rejection candle confirmed",
-                    "details": f"Wick touched ${current_candle['high']:.5f}, closed bearish",
+                    "details": f"Wick touched {current_candle['high']:.5f}, closed bearish",
                     "explanation": "Perfect rejection! Sellers defended resistance. High probability SHORT setup forming."
                 })
 
@@ -1951,7 +1951,7 @@ class BearishProTraderEURUSD:
                     "title": "WAITING for confirmation candle",
                     "details": f"Next candle starts at {current_candle['candle_close_expected']}",
                     "requirements": [
-                        {"text": f"Close BELOW ${key_level - 0.0010:.5f}", "explanation": "Shows downward momentum continuing"},
+                        {"text": f"Close BELOW {key_level - 0.0010:.5f}", "explanation": "Shows downward momentum continuing"},
                         {"text": "Red/bearish candle", "explanation": "Sellers in control"},
                         {"text": "No large upper wick", "explanation": "No heavy buying"}
                     ],
@@ -1981,23 +1981,23 @@ class BearishProTraderEURUSD:
                 "entry_options": [
                     {
                         "type": "Option A: Enter at retest level (Aggressive)",
-                        "entry": f"${key_level:.5f}",
-                        "stop_loss": f"${stop_loss:.5f}",
-                        "take_profit": f"${take_profit:.5f}",
+                        "entry": f"{key_level:.5f}",
+                        "stop_loss": f"{stop_loss:.5f}",
+                        "take_profit": f"{take_profit:.5f}",
                         "risk_pips": f"{risk_pips:.1f} pips",
                         "reward_pips": f"{reward_pips:.1f} pips",
                         "risk_reward": f"1:{reward_pips/risk_pips:.1f}",
-                        "trigger": f"Enter SHORT NOW at ${current_price:.5f}",
+                        "trigger": f"Enter SHORT NOW at {current_price:.5f}",
                         "pros": "Best entry price, catch full move",
                         "cons": "No confirmation candle yet",
-                        "why_sl": f"SL at ${stop_loss:.5f} - If price closes above resistance, retest failed",
-                        "why_tp": f"TP at ${take_profit:.5f} - Next support level or 1:2 R:R minimum"
+                        "why_sl": f"SL at {stop_loss:.5f} - If price closes above resistance, retest failed",
+                        "why_tp": f"TP at {take_profit:.5f} - Next support level or 1:2 R:R minimum"
                     },
                     {
                         "type": "Option B: Wait for rejection confirmation (Conservative)",
-                        "entry": f"Wait for rejection (est. ${current_price - 0.0005:.5f})",
-                        "stop_loss": f"${stop_loss:.5f}",
-                        "take_profit": f"${take_profit:.5f}",
+                        "entry": f"Wait for rejection (est. {current_price - 0.0005:.5f})",
+                        "stop_loss": f"{stop_loss:.5f}",
+                        "take_profit": f"{take_profit:.5f}",
                         "risk_pips": f"{risk_pips + 5:.1f} pips (slightly more)",
                         "reward_pips": f"{reward_pips - 5:.1f} pips (slightly less)",
                         "risk_reward": f"1:{(reward_pips - 5)/(risk_pips + 5):.1f}",
@@ -2005,8 +2005,8 @@ class BearishProTraderEURUSD:
                         "confirmed": setup.get("rejection_confirmed", False),
                         "pros": "Confirmation of sellers defending resistance",
                         "cons": "Slightly worse entry price",
-                        "why_sl": f"SL at ${stop_loss:.5f} - If price closes above resistance, retest failed",
-                        "why_tp": f"TP at ${take_profit:.5f} - Next support level or 1:2 R:R minimum"
+                        "why_sl": f"SL at {stop_loss:.5f} - If price closes above resistance, retest failed",
+                        "why_tp": f"TP at {take_profit:.5f} - Next support level or 1:2 R:R minimum"
                     }
                 ],
                 "recommendation": "Option A for aggressive (retest entry), Option B for conservative (wait for rejection)",
@@ -2033,7 +2033,7 @@ class BearishProTraderEURUSD:
                 "step": 1,
                 "status": "complete",
                 "title": "🏔️ Supply Zone Detected (H4 Resistance)",
-                "details": f"Resistance at ${key_level:.5f} - Sellers defend this level",
+                "details": f"Resistance at {key_level:.5f} - Sellers defend this level",
                 "explanation": f"H4 resistance zone tested multiple times. Currently {distance_pips:.1f} pips away. Institutions place SELL orders here."
             })
 
@@ -2041,7 +2041,7 @@ class BearishProTraderEURUSD:
                 "step": 2,
                 "status": "in_progress",
                 "title": "📍 Price Action",
-                "details": f"Price ${current_price:.5f} is {distance_pips:.1f} pips below resistance",
+                "details": f"Price {current_price:.5f} is {distance_pips:.1f} pips below resistance",
                 "explanation": "Waiting for price to approach resistance zone (within 10 pips)"
             })
 
@@ -2051,7 +2051,7 @@ class BearishProTraderEURUSD:
                 "step": 1,
                 "status": "complete",
                 "title": "🏔️ Supply Zone Detected (H4 Resistance)",
-                "details": f"Resistance at ${key_level:.5f}",
+                "details": f"Resistance at {key_level:.5f}",
                 "explanation": "H4 resistance zone where sellers historically defended"
             })
 
@@ -2059,7 +2059,7 @@ class BearishProTraderEURUSD:
                 "step": 2,
                 "status": "in_progress",
                 "title": "📍 Price Approaching",
-                "details": f"Price ${current_price:.5f} is {distance_pips:.1f} pips from resistance",
+                "details": f"Price {current_price:.5f} is {distance_pips:.1f} pips from resistance",
                 "explanation": "Price getting close to resistance. Prepare for potential rejection."
             })
 
@@ -2069,7 +2069,7 @@ class BearishProTraderEURUSD:
                 "step": 1,
                 "status": "complete",
                 "title": "🏔️ Supply Zone Detected (H4 Resistance)",
-                "details": f"Resistance at ${key_level:.5f}",
+                "details": f"Resistance at {key_level:.5f}",
                 "explanation": "H4 resistance where sellers historically defended"
             })
 
@@ -2077,7 +2077,7 @@ class BearishProTraderEURUSD:
                 "step": 2,
                 "status": "complete",
                 "title": "✅ Price Reached Resistance",
-                "details": f"Price touched resistance zone (current: ${current_price:.5f}, {distance_pips:.1f} pips from level)",
+                "details": f"Price touched resistance zone (current: {current_price:.5f}, {distance_pips:.1f} pips from level)",
                 "explanation": "Price at key resistance level. Entry signal is active."
             })
 
@@ -2099,23 +2099,23 @@ class BearishProTraderEURUSD:
                 "entry_options": [
                     {
                         "type": "Option A: Enter at resistance level (Aggressive)",
-                        "entry": f"${key_level:.5f}",
-                        "stop_loss": f"${stop_loss:.5f}",
-                        "take_profit": f"${aggressive_take_profit:.5f}",
+                        "entry": f"{key_level:.5f}",
+                        "stop_loss": f"{stop_loss:.5f}",
+                        "take_profit": f"{aggressive_take_profit:.5f}",
                         "risk_pips": f"{aggressive_risk_pips:.1f} pips",
                         "reward_pips": f"{aggressive_reward_pips:.1f} pips",
                         "risk_reward": f"1:{aggressive_reward_pips/aggressive_risk_pips:.1f}",
-                        "trigger": f"Enter NOW at ${key_level:.5f}",
+                        "trigger": f"Enter NOW at {key_level:.5f}",
                         "pros": "Best entry price, highest R:R",
                         "cons": "No confirmation of rejection",
-                        "why_sl": f"SL at ${stop_loss:.5f} - If price closes above resistance, setup invalidated",
-                        "why_tp": f"TP at ${aggressive_take_profit:.5f} - Next support level or 1:2 R:R minimum"
+                        "why_sl": f"SL at {stop_loss:.5f} - If price closes above resistance, setup invalidated",
+                        "why_tp": f"TP at {aggressive_take_profit:.5f} - Next support level or 1:2 R:R minimum"
                     },
                     {
                         "type": "Option B: Wait for bearish rejection (Conservative)",
-                        "entry": f"Wait for rejection (est. ${current_price:.5f})",
-                        "stop_loss": f"${stop_loss:.5f}",
-                        "take_profit": f"${take_profit:.5f}",
+                        "entry": f"Wait for rejection (est. {current_price:.5f})",
+                        "stop_loss": f"{stop_loss:.5f}",
+                        "take_profit": f"{take_profit:.5f}",
                         "risk_pips": f"{risk_pips:.1f} pips (slightly more)",
                         "reward_pips": f"{reward_pips:.1f} pips (slightly less)",
                         "risk_reward": f"1:{reward_pips/risk_pips:.1f}",
@@ -2123,8 +2123,8 @@ class BearishProTraderEURUSD:
                         "confirmed": strong_rejection,
                         "pros": "Confirmation of sellers stepping in",
                         "cons": "Slightly worse entry price",
-                        "why_sl": f"SL at ${stop_loss:.5f} - If price closes above resistance, setup invalidated",
-                        "why_tp": f"TP at ${take_profit:.5f} - Next support level or 1:2 R:R minimum"
+                        "why_sl": f"SL at {stop_loss:.5f} - If price closes above resistance, setup invalidated",
+                        "why_tp": f"TP at {take_profit:.5f} - Next support level or 1:2 R:R minimum"
                     }
                 ],
                 "recommendation": "Option A for aggressive (resistance level entry), Option B for conservative (wait for rejection)",
@@ -2149,7 +2149,7 @@ class BearishProTraderEURUSD:
             "step": 1,
             "status": "complete" if state in ["APPROACHING", "IN_FVG"] else "in_progress",
             "title": "📊 Fair Value Gap Detected",
-            "details": f"FVG Zone: ${fvg_zone.get('bottom', 0):.5f} - ${fvg_zone.get('top', 0):.5f} ({fvg_zone.get('size_pips', 0):.1f} pips)",
+            "details": f"FVG Zone: {fvg_zone.get('bottom', 0):.5f} - {fvg_zone.get('top', 0):.5f} ({fvg_zone.get('size_pips', 0):.1f} pips)",
             "explanation": f"Unfilled gap from {fvg_zone.get('age_candles', 0)} candles ago. Price magnetically pulled to fill it. Currently {distance:.1f} pips away."
         })
 
@@ -2167,7 +2167,7 @@ class BearishProTraderEURUSD:
                 "step": 2,
                 "status": "complete",
                 "title": "✅ Price Inside FVG",
-                "details": f"Current: ${current_price:.5f} (inside FVG zone)",
+                "details": f"Current: {current_price:.5f} (inside FVG zone)",
                 "explanation": "Price has reached the gap! High probability of bearish rejection."
             })
         else:
@@ -2188,7 +2188,7 @@ class BearishProTraderEURUSD:
                 "entry_options": [
                     {
                         "type": "Option A: Enter at FVG midpoint (Aggressive)",
-                        "trigger": f"Enter NOW at ${fvg_zone.get('midpoint', 0):.5f}",
+                        "trigger": f"Enter NOW at {fvg_zone.get('midpoint', 0):.5f}",
                         "pros": "Best entry price, highest R:R",
                         "cons": "No confirmation candle"
                     },
@@ -2281,7 +2281,7 @@ class BearishProTraderEURUSD:
             "step": 1,
             "status": "complete" if state in ["APPROACHING", "IN_ORDER_BLOCK"] else "in_progress",
             "title": "📦 Order Block Detected",
-            "details": f"OB Zone: ${ob_zone.get('bottom', 0):.5f} - ${ob_zone.get('top', 0):.5f} ({ob_zone.get('size_pips', 0):.1f} pips)",
+            "details": f"OB Zone: {ob_zone.get('bottom', 0):.5f} - {ob_zone.get('top', 0):.5f} ({ob_zone.get('size_pips', 0):.1f} pips)",
             "explanation": f"Institutional SELL orders placed {ob_zone.get('age_candles', 0)} candles ago. Currently {distance:.1f} pips away."
         })
 
@@ -2323,23 +2323,23 @@ class BearishProTraderEURUSD:
                 "entry_options": [
                     {
                         "type": "Option A: Enter at OB midpoint (Aggressive)",
-                        "entry": f"${ob_zone.get('midpoint', 0):.5f}",
-                        "stop_loss": f"${sl_tp['stop_loss']:.5f}",
-                        "take_profit": f"${sl_tp['take_profit']:.5f}",
+                        "entry": f"{ob_zone.get('midpoint', 0):.5f}",
+                        "stop_loss": f"{sl_tp['stop_loss']:.5f}",
+                        "take_profit": f"{sl_tp['take_profit']:.5f}",
                         "risk_pips": f"{sl_tp['risk_pips']:.1f} pips",
                         "reward_pips": f"{sl_tp['reward_pips']:.1f} pips",
                         "risk_reward": f"1:{sl_tp['risk_reward_ratio']:.1f}",
-                        "trigger": f"SELL NOW at ${ob_zone.get('midpoint', 0):.5f}",
+                        "trigger": f"SELL NOW at {ob_zone.get('midpoint', 0):.5f}",
                         "pros": "Best entry price, highest R:R",
                         "cons": "No confirmation candle",
-                        "why_sl": f"SL at ${sl_tp['stop_loss']:.5f} - If price closes above OB zone, setup is invalidated",
-                        "why_tp": f"TP at ${sl_tp['take_profit']:.5f} - Next support level or 1:2 R:R minimum"
+                        "why_sl": f"SL at {sl_tp['stop_loss']:.5f} - If price closes above OB zone, setup is invalidated",
+                        "why_tp": f"TP at {sl_tp['take_profit']:.5f} - Next support level or 1:2 R:R minimum"
                     },
                     {
                         "type": "Option B: Wait for bearish confirmation (Conservative)",
-                        "entry": f"Wait for close (est. ${ob_zone.get('bottom', 0):.5f})",
-                        "stop_loss": f"${sl_tp['stop_loss']:.5f}",
-                        "take_profit": f"${sl_tp['take_profit']:.5f}",
+                        "entry": f"Wait for close (est. {ob_zone.get('bottom', 0):.5f})",
+                        "stop_loss": f"{sl_tp['stop_loss']:.5f}",
+                        "take_profit": f"{sl_tp['take_profit']:.5f}",
                         "risk_pips": f"{sl_tp['risk_pips'] + 5:.1f} pips (slightly more)",
                         "reward_pips": f"{sl_tp['reward_pips'] - 5:.1f} pips (slightly less)",
                         "risk_reward": f"1:{(sl_tp['reward_pips'] - 5) / (sl_tp['risk_pips'] + 5):.1f}",
@@ -2347,8 +2347,8 @@ class BearishProTraderEURUSD:
                         "confirmed": setup.get("strong_rejection", False),
                         "pros": "Confirmation of sellers stepping in",
                         "cons": "Slightly worse entry price",
-                        "why_sl": f"SL at ${sl_tp['stop_loss']:.5f} - If price closes above OB zone, setup is invalidated",
-                        "why_tp": f"TP at ${sl_tp['take_profit']:.5f} - Next support level or 1:2 R:R minimum"
+                        "why_sl": f"SL at {sl_tp['stop_loss']:.5f} - If price closes above OB zone, setup is invalidated",
+                        "why_tp": f"TP at {sl_tp['take_profit']:.5f} - Next support level or 1:2 R:R minimum"
                     }
                 ],
                 "recommendation": "Option A for aggressive (OB midpoint entry), Option B for conservative (wait for confirmation)",
@@ -2384,7 +2384,7 @@ class BearishProTraderEURUSD:
             "status": "complete",
             "title": f"✅ {total_score} Confluence Points Detected",
             "details": "\n".join(confluence_list),
-            "explanation": f"Multiple patterns aligned at ${key_level:.5f} resistance. Professional setup forming."
+            "explanation": f"Multiple patterns aligned at {key_level:.5f} resistance. Professional setup forming."
         })
 
         # Step 2: Dynamic entry status based on price location (BEARISH)
@@ -2399,7 +2399,7 @@ class BearishProTraderEURUSD:
                     "step": 2,
                     "status": "complete",
                     "title": "🎯 PRICE AT ENTRY ZONE - READY TO ENTER!",
-                    "details": f"Current: ${current_price:.5f} | Entry: ${entry_zone:.5f} ({abs(distance_to_entry):.1f} pips away)",
+                    "details": f"Current: {current_price:.5f} | Entry: {entry_zone:.5f} ({abs(distance_to_entry):.1f} pips away)",
                     "explanation": "Price reached entry zone! Enter now with market/limit order."
                 })
             elif distance_to_entry < -0.0002:
@@ -2408,7 +2408,7 @@ class BearishProTraderEURUSD:
                     "step": 2,
                     "status": "in_progress",
                     "title": "⏳ Waiting for bounce to entry zone",
-                    "details": f"Price: ${current_price:.5f} | Entry: ${entry_zone:.5f} ({abs(distance_to_entry):.1f} pips below)",
+                    "details": f"Price: {current_price:.5f} | Entry: {entry_zone:.5f} ({abs(distance_to_entry):.1f} pips below)",
                     "explanation": "Place limit order at entry or wait for price to bounce up."
                 })
             else:
@@ -2417,7 +2417,7 @@ class BearishProTraderEURUSD:
                     "step": 2,
                     "status": "in_progress",
                     "title": "⚠️ Price above entry zone",
-                    "details": f"Price: ${current_price:.5f} | Entry: ${entry_zone:.5f} ({distance_to_entry:.1f} pips above)",
+                    "details": f"Price: {current_price:.5f} | Entry: {entry_zone:.5f} ({distance_to_entry:.1f} pips above)",
                     "explanation": "Price moved above entry. Wait for price to come back down or monitor for invalidation."
                 })
 
@@ -2445,7 +2445,7 @@ class BearishProTraderEURUSD:
             "key_level": key_level,
             "level_type": level_type,
             "points": [
-                f"Key Level: ${key_level:.5f} ({level_type})",
+                f"Key Level: {key_level:.5f} ({level_type})",
                 f"This level has been tested multiple times on 4H chart",
                 f"Currently {distance:.1f} pips away from key level",
                 "Structure shows institutional interest at this price"
@@ -2525,15 +2525,15 @@ class BearishProTraderEURUSD:
         if liquidity_grab or order_block:
             # Enter at H4 resistance/order block (where institutions will sell)
             entry = key_level - 0.0002  # 2 pips below H4 resistance
-            entry_reason = f"Enter 2 pips below H4 resistance ${key_level:.5f} (order block/liquidity grab confirmed)"
+            entry_reason = f"Enter 2 pips below H4 resistance {key_level:.5f} (order block/liquidity grab confirmed)"
         elif supply_zone:
             # Enter at supply zone
             entry = key_level - 0.0002
-            entry_reason = f"Enter 2 pips below ${key_level:.5f} supply zone"
+            entry_reason = f"Enter 2 pips below {key_level:.5f} supply zone"
         else:
             # Default: enter at key level
             entry = current_price if current_price < key_level else key_level - 0.0002
-            entry_reason = f"Enter at current price ${current_price:.5f}"
+            entry_reason = f"Enter at current price {current_price:.5f}"
 
         # STOP LOSS: Professional methodology (BEARISH)
         # OPTION 3: Use closest confluence to entry for SL
@@ -2548,7 +2548,7 @@ class BearishProTraderEURUSD:
                 "name": "Liquidity Grab",
                 "level": liquidity_grab_high,
                 "sl": liquidity_grab_high + 0.0006,  # Changed from 0.0005 to 0.0006, ABOVE for bearish
-                "reason": f"Above liquidity grab high (${liquidity_grab_high:.5f}) - stops already swept"
+                "reason": f"Above liquidity grab high ({liquidity_grab_high:.5f}) - stops already swept"
             })
 
         if supply_zone:
@@ -2556,7 +2556,7 @@ class BearishProTraderEURUSD:
                 "name": "Supply Zone",
                 "level": key_level,
                 "sl": key_level + 0.0006,  # ABOVE for bearish
-                "reason": f"Above supply zone (${key_level:.5f}) with 6 pip buffer"
+                "reason": f"Above supply zone ({key_level:.5f}) with 6 pip buffer"
             })
 
         if order_block:
@@ -2569,7 +2569,7 @@ class BearishProTraderEURUSD:
                     "name": "Order Block",
                     "level": ob_top,
                     "sl": ob_top + 0.0006,  # ABOVE for bearish
-                    "reason": f"Above Order Block top (${ob_top:.5f}) with 6 pip buffer"
+                    "reason": f"Above Order Block top ({ob_top:.5f}) with 6 pip buffer"
                 })
 
         if fvg:
@@ -2579,7 +2579,7 @@ class BearishProTraderEURUSD:
                     "name": "FVG",
                     "level": fvg_level,
                     "sl": fvg_level + 0.0006,  # ABOVE for bearish
-                    "reason": f"Above FVG top (${fvg_level:.5f}) with 6 pip buffer"
+                    "reason": f"Above FVG top ({fvg_level:.5f}) with 6 pip buffer"
                 })
 
         if breakdown_retest:
@@ -2589,7 +2589,7 @@ class BearishProTraderEURUSD:
                     "name": "Breakdown Retest",
                     "level": breakdown_level,
                     "sl": breakdown_level + 0.0006,  # ABOVE for bearish
-                    "reason": f"Above breakdown level (${breakdown_level:.5f}) with 6 pip buffer"
+                    "reason": f"Above breakdown level ({breakdown_level:.5f}) with 6 pip buffer"
                 })
 
         # Find closest confluence to entry
@@ -2627,21 +2627,21 @@ class BearishProTraderEURUSD:
             support_2 = valid_tp2_levels[0] if valid_tp2_levels[0] != support_1 else (valid_tp2_levels[1] if len(valid_tp2_levels) > 1 else support_1 - 0.0015)
             tp1 = support_1 + 0.0005  # 5 pips before (above) support (1 pip = 0.0001 for EUR/USD)
             tp2 = support_2 + 0.0005  # 5 pips before (above) support
-            tp1_reason = f"5 pips before H4 support ${support_1:.5f} (at ${tp1:.5f})"
-            tp2_reason = f"5 pips before H4 support ${support_2:.5f} (at ${tp2:.5f})"
+            tp1_reason = f"5 pips before H4 support {support_1:.5f} (at {tp1:.5f})"
+            tp2_reason = f"5 pips before H4 support {support_2:.5f} (at {tp2:.5f})"
         elif len(valid_tp1_levels) >= 1:
             # One valid support found
             support_1 = valid_tp1_levels[0]
             tp1 = support_1 + 0.0005  # 5 pips before (above) support
             tp2 = entry - min_tp2_distance  # Use R:R based target for TP2
-            tp1_reason = f"5 pips before H4 support ${support_1:.5f} (at ${tp1:.5f})"
-            tp2_reason = f"Extended target (3:1 R:R) at ${tp2:.5f}"
+            tp1_reason = f"5 pips before H4 support {support_1:.5f} (at {tp1:.5f})"
+            tp2_reason = f"Extended target (3:1 R:R) at {tp2:.5f}"
         else:
             # No structure found - use R:R based targets (2:1 and 3:1 minimum)
             tp1 = entry - min_tp1_distance
             tp2 = entry - min_tp2_distance
-            tp1_reason = f"Target (2:1 R:R) at ${tp1:.5f}"
-            tp2_reason = f"Extended target (3:1 R:R) at ${tp2:.5f}"
+            tp1_reason = f"Target (2:1 R:R) at {tp1:.5f}"
+            tp2_reason = f"Extended target (3:1 R:R) at {tp2:.5f}"
 
         # Calculate R:R ratios
         # For EUR/USD: 1 pip = 0.0001, so multiply dollar difference by 10000
@@ -2659,16 +2659,16 @@ class BearishProTraderEURUSD:
         return {
             "status": "Ready",
             "entry_method": "Limit order" if entry > current_price else "Market order",
-            "entry_price": f"${entry:.5f}",
+            "entry_price": f"{entry:.5f}",
             "entry_reasoning": entry_reason,
             "stop_loss": {
-                "price": f"${sl:.5f}",
+                "price": f"{sl:.5f}",
                 "reason": sl_reason,
                 "pips": f"{risk_pips:.1f} pips risk",
                 "why": "If price goes here, setup invalidated - liquidity already grabbed, further upside means failure"
             },
             "take_profit_1": {
-                "price": f"${tp1:.5f}",
+                "price": f"{tp1:.5f}",
                 "reason": tp1_reason,
                 "pips": f"-{reward1_pips:.1f} pips",
                 "rr_ratio": f"{rr1:.2f}:1",
@@ -2676,7 +2676,7 @@ class BearishProTraderEURUSD:
                 "why": "Lock in profit, secure risk-free trade"
             },
             "take_profit_2": {
-                "price": f"${tp2:.5f}",
+                "price": f"{tp2:.5f}",
                 "reason": tp2_reason,
                 "pips": f"-{reward2_pips:.1f} pips",
                 "rr_ratio": f"{rr2:.2f}:1",
@@ -2764,15 +2764,15 @@ class BearishProTraderEURUSD:
         # Build trade progress status
         if trade_result == "SL_HIT":
             status = "TRADE_STOPPED_OUT"
-            status_message = f"❌ Stop Loss Hit at ${sl:.5f}"
+            status_message = f"❌ Stop Loss Hit at {sl:.5f}"
             is_active = False  # Trade finished
         elif trade_result == "TP2_HIT":
             status = "TRADE_COMPLETED"
-            status_message = f"✅ TP2 Hit! Full profit taken at ${tp2:.5f}"
+            status_message = f"✅ TP2 Hit! Full profit taken at {tp2:.5f}"
             is_active = False  # Trade finished
         elif trade_result == "TP1_HIT":
             status = "TRADE_ACTIVE_TP1_HIT"
-            status_message = f"✅ TP1 Hit! Waiting for TP2 at ${tp2:.5f}"
+            status_message = f"✅ TP1 Hit! Waiting for TP2 at {tp2:.5f}"
             is_active = True  # Still watching for TP2
         else:
             # Trade still active, no TP/SL hit yet
@@ -2785,14 +2785,14 @@ class BearishProTraderEURUSD:
 
             if pnl_pips >= 0:
                 if distance_to_tp1 <= 50:  # Within 50 pips = approaching
-                    status_message = f"🎯 Approaching TP1 (${tp1:.5f}) - {distance_to_tp1:.1f} pips away"
+                    status_message = f"🎯 Approaching TP1 ({tp1:.5f}) - {distance_to_tp1:.1f} pips away"
                 else:
-                    status_message = f"📈 In Profit +{pnl_pips:.1f} pips | Target: TP1 ${tp1:.5f}"
+                    status_message = f"📈 In Profit +{pnl_pips:.1f} pips | Target: TP1 {tp1:.5f}"
             else:
                 if abs(pnl_pips) <= 3:
-                    status_message = f"⏸️ At Entry ${entry:.5f} ({pnl_pips:+.1f} pips)"
+                    status_message = f"⏸️ At Entry {entry:.5f} ({pnl_pips:+.1f} pips)"
                 else:
-                    status_message = f"📉 Pullback {pnl_pips:.1f} pips | SL: ${sl:.5f} ({distance_to_sl:.1f} pips away)"
+                    status_message = f"📉 Pullback {pnl_pips:.1f} pips | SL: {sl:.5f} ({distance_to_sl:.1f} pips away)"
 
             is_active = True
 
@@ -2822,7 +2822,7 @@ class BearishProTraderEURUSD:
                     "pattern": "ACTIVE_TRADE",
                     "points": [
                         f"Trade Status: {status}",
-                        f"Entry: ${entry:.5f}",
+                        f"Entry: {entry:.5f}",
                         f"Current P&L: {pnl_pips:+.1f} pips ({pnl_percent:+.2f}%)",
                         status_message
                     ]
@@ -2844,8 +2844,8 @@ class BearishProTraderEURUSD:
             # Invalidation = SL level
             "invalidation": [
                 {
-                    "condition": f"Stop Loss at ${sl:.5f}",
-                    "reason": f"Trade invalidated if price hits ${sl:.5f}",
+                    "condition": f"Stop Loss at {sl:.5f}",
+                    "reason": f"Trade invalidated if price hits {sl:.5f}",
                     "action": f"Exit trade - {abs(entry - sl):.1f} pip loss",
                     "severity": "CRITICAL"
                 }
@@ -2871,7 +2871,7 @@ class BearishProTraderEURUSD:
         steps.append({
             "step": 1,
             "status": "complete",
-            "title": f"✅ Entered SHORT at ${entry:.5f}",
+            "title": f"✅ Entered SHORT at {entry:.5f}",
             "details": f"Trade active with {abs(entry - sl) * 10000:.1f} pip stop loss",
             "explanation": "Position opened based on 5+ confluence points"
         })
@@ -2881,13 +2881,13 @@ class BearishProTraderEURUSD:
         distance_to_tp1 = (current_price - tp1) * 10000  # For SHORT positions
         if trade_result == "TP2_HIT" or trade_result == "TP1_HIT":
             tp1_status = "complete"
-            tp1_title = f"✅ TP1 Hit at ${tp1:.5f}"
+            tp1_title = f"✅ TP1 Hit at {tp1:.5f}"
         elif distance_to_tp1 <= 50:  # Within 50 pips = approaching
             tp1_status = "in_progress"
             tp1_title = f"🎯 Approaching TP1 - {distance_to_tp1:.1f} pips away"
         else:
             tp1_status = "pending"
-            tp1_title = f"⏳ Target TP1 at ${tp1:.5f} ({distance_to_tp1:.1f} pips)"
+            tp1_title = f"⏳ Target TP1 at {tp1:.5f} ({distance_to_tp1:.1f} pips)"
 
         steps.append({
             "step": 2,
@@ -2902,13 +2902,13 @@ class BearishProTraderEURUSD:
         distance_to_tp2 = (current_price - tp2) * 10000  # For SHORT positions
         if trade_result == "TP2_HIT":
             tp2_status = "complete"
-            tp2_title = f"✅ TP2 Hit at ${tp2:.5f} - Trade Complete!"
+            tp2_title = f"✅ TP2 Hit at {tp2:.5f} - Trade Complete!"
         elif trade_result == "TP1_HIT":
             tp2_status = "in_progress"
-            tp2_title = f"🎯 Targeting TP2 at ${tp2:.5f} ({distance_to_tp2:.1f} pips)"
+            tp2_title = f"🎯 Targeting TP2 at {tp2:.5f} ({distance_to_tp2:.1f} pips)"
         else:
             tp2_status = "pending"
-            tp2_title = f"⏳ Final Target TP2 at ${tp2:.5f} ({distance_to_tp2:.1f} pips)"
+            tp2_title = f"⏳ Final Target TP2 at {tp2:.5f} ({distance_to_tp2:.1f} pips)"
 
         steps.append({
             "step": 3,
@@ -2930,7 +2930,7 @@ class BearishProTraderEURUSD:
             "step": 4,
             "status": pnl_status,
             "title": f"{pnl_emoji} Current P&L: {pnl_pips:+.1f} pips",
-            "details": f"Price: ${current_price:.5f} | Entry: ${entry:.5f}",
+            "details": f"Price: {current_price:.5f} | Entry: {entry:.5f}",
             "explanation": "Live profit/loss tracking"
         })
 
@@ -3015,7 +3015,7 @@ class BearishProTraderEURUSD:
         if state == "BREAKOUT_CONFIRMED":
             # For bearish: If price closes ABOVE resistance after breakdown, setup fails
             conditions.append({
-                "condition": f"Price closes back ABOVE ${key_level:.5f}",
+                "condition": f"Price closes back ABOVE {key_level:.5f}",
                 "reason": "Breakdown failed - false breakdown",
                 "action": "Cancel setup immediately. This was a trap.",
                 "severity": "CRITICAL"
@@ -3030,7 +3030,7 @@ class BearishProTraderEURUSD:
         elif state == "RETEST_HAPPENING":
             # For bearish: If price closes ABOVE resistance, retest failed
             conditions.append({
-                "condition": f"Current candle closes ABOVE ${key_level + 0.0005:.5f}",
+                "condition": f"Current candle closes ABOVE {key_level + 0.0005:.5f}",
                 "reason": "Retest failed - sellers didn't defend",
                 "action": "Cancel setup. Resistance broken = bullish",
                 "severity": "CRITICAL"
@@ -3047,13 +3047,13 @@ class BearishProTraderEURUSD:
             runaway_threshold = key_level - 20
 
             conditions.append({
-                "condition": f"Price moves below ${runaway_threshold:.5f} without pullback",
+                "condition": f"Price moves below {runaway_threshold:.5f} without pullback",
                 "reason": "Setup ran away - strong momentum without retest (20+ pips below breakdown)",
                 "action": "Cancel setup. Look for new entry or pattern.",
                 "severity": "HIGH"
             })
             conditions.append({
-                "condition": f"Price closes back ABOVE ${key_level:.5f}",
+                "condition": f"Price closes back ABOVE {key_level:.5f}",
                 "reason": "Breakdown failed - false breakdown",
                 "action": "Cancel setup immediately. Breakdown reversed.",
                 "severity": "CRITICAL"
@@ -3068,7 +3068,7 @@ class BearishProTraderEURUSD:
         elif state == "REJECTION_WAITING":
             # For bearish: If price closes ABOVE resistance, rejection failed
             conditions.append({
-                "condition": f"Candle closes ABOVE ${key_level:.5f}",
+                "condition": f"Candle closes ABOVE {key_level:.5f}",
                 "reason": "Failed to reject from resistance - breakout",
                 "action": "Setup INVALID. Exit if entered early.",
                 "severity": "CRITICAL"
@@ -3089,7 +3089,7 @@ class BearishProTraderEURUSD:
         elif state == "CONFIRMATION_WAITING":
             # For bearish: If next candle closes ABOVE resistance, setup dead
             conditions.append({
-                "condition": f"Next candle closes ABOVE ${key_level:.5f}",
+                "condition": f"Next candle closes ABOVE {key_level:.5f}",
                 "reason": "Rejection failed - price broke UP after",
                 "action": "Setup dead. Do not enter.",
                 "severity": "CRITICAL"
@@ -3110,7 +3110,7 @@ class BearishProTraderEURUSD:
         elif state == "READY_TO_ENTER":
             # For bearish: If entry candle closes ABOVE resistance, setup failed
             conditions.append({
-                "condition": f"Entry candle closes ABOVE ${key_level:.5f}",
+                "condition": f"Entry candle closes ABOVE {key_level:.5f}",
                 "reason": "Setup collapsed on entry candle",
                 "action": "Do NOT enter. Setup failed.",
                 "severity": "CRITICAL"
@@ -3124,7 +3124,7 @@ class BearishProTraderEURUSD:
 
         # Universal invalidations (BEARISH - price goes UP kills setup)
         conditions.append({
-            "condition": f"Price rises ${(key_level * 0.01):.5f}+ ABOVE resistance",
+            "condition": f"Price rises {(key_level * 0.01):.5f}+ ABOVE resistance",
             "reason": "Major resistance break (1% above key level)",
             "action": "Setup completely dead. Look for new pattern.",
             "severity": "CRITICAL"
@@ -3144,7 +3144,7 @@ class BearishProTraderEURUSD:
         # State-specific invalidations
         if state == "DETECTED":
             conditions.append({
-                "condition": f"Price continues DOWN without filling FVG (${gap_top:.5f})",
+                "condition": f"Price continues DOWN without filling FVG ({gap_top:.5f})",
                 "reason": "FVG may not be filled this time",
                 "action": "Wait or look for other setups",
                 "severity": "HIGH"
@@ -3158,7 +3158,7 @@ class BearishProTraderEURUSD:
 
         elif state == "APPROACHING":
             conditions.append({
-                "condition": f"Price reverses DOWN before reaching FVG top (${gap_top:.5f})",
+                "condition": f"Price reverses DOWN before reaching FVG top ({gap_top:.5f})",
                 "reason": "Failed to fill the gap completely",
                 "action": "Setup invalidated - gap may not fill",
                 "severity": "HIGH"
@@ -3172,7 +3172,7 @@ class BearishProTraderEURUSD:
 
         elif state == "IN_FVG":
             conditions.append({
-                "condition": f"Price closes ABOVE gap top (${gap_top + 0.0005:.5f})",
+                "condition": f"Price closes ABOVE gap top ({gap_top + 0.0005:.5f})",
                 "reason": "Broke through FVG without rejecting",
                 "action": "Setup FAILED. FVG not respected.",
                 "severity": "CRITICAL"
@@ -3212,7 +3212,7 @@ class BearishProTraderEURUSD:
         # State-specific invalidations
         if state == "DETECTED":
             conditions.append({
-                "condition": f"Price continues DOWN without reaching OB (${ob_top:.5f})",
+                "condition": f"Price continues DOWN without reaching OB ({ob_top:.5f})",
                 "reason": "Order Block may not be tested this time",
                 "action": "Wait or look for other setups",
                 "severity": "HIGH"
@@ -3226,7 +3226,7 @@ class BearishProTraderEURUSD:
 
         elif state == "APPROACHING":
             conditions.append({
-                "condition": f"Price reverses DOWN before reaching OB top (${ob_top:.5f})",
+                "condition": f"Price reverses DOWN before reaching OB top ({ob_top:.5f})",
                 "reason": "Failed to test the order block completely",
                 "action": "Setup invalidated - OB not tested",
                 "severity": "HIGH"
@@ -3240,7 +3240,7 @@ class BearishProTraderEURUSD:
 
         elif state == "IN_OB":
             conditions.append({
-                "condition": f"Price closes ABOVE OB top (${ob_top + 0.0003:.5f})",
+                "condition": f"Price closes ABOVE OB top ({ob_top + 0.0003:.5f})",
                 "reason": "Broke through order block = mitigated/absorbed",
                 "action": "Setup FAILED. Institutional orders absorbed.",
                 "severity": "CRITICAL"
@@ -3283,7 +3283,7 @@ class BearishProTraderEURUSD:
         # State-specific invalidations
         if state == "AT_ZONE":
             conditions.append({
-                "condition": f"Price closes ABOVE ${key_level + 0.0010:.5f}",
+                "condition": f"Price closes ABOVE {key_level + 0.0010:.5f}",
                 "reason": "Resistance broken - supply zone failed",
                 "action": "Cancel setup immediately. Look for LONG instead.",
                 "severity": "CRITICAL"
@@ -3297,7 +3297,7 @@ class BearishProTraderEURUSD:
 
         elif state == "WATCHING":
             conditions.append({
-                "condition": f"Price closes decisively ABOVE ${key_level + 0.0010:.5f}",
+                "condition": f"Price closes decisively ABOVE {key_level + 0.0010:.5f}",
                 "reason": "Failed resistance - breakout occurring",
                 "action": "Setup INVALID. Cancel immediately.",
                 "severity": "CRITICAL"
@@ -3311,7 +3311,7 @@ class BearishProTraderEURUSD:
 
         elif state == "REJECTION_CONFIRMED":
             conditions.append({
-                "condition": f"Next candle closes ABOVE ${key_level:.5f}",
+                "condition": f"Next candle closes ABOVE {key_level:.5f}",
                 "reason": "Rejection failed - false signal",
                 "action": "Do NOT enter. Setup collapsed.",
                 "severity": "CRITICAL"
@@ -3331,7 +3331,7 @@ class BearishProTraderEURUSD:
 
         # Universal invalidations
         conditions.append({
-            "condition": f"Price rises ${(key_level * 0.01):.5f}+ ABOVE resistance",
+            "condition": f"Price rises {(key_level * 0.01):.5f}+ ABOVE resistance",
             "reason": "Major breakout (1% above resistance)",
             "action": "Supply zone completely failed. Look elsewhere.",
             "severity": "CRITICAL"
