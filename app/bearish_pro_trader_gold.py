@@ -165,16 +165,19 @@ class BearishProTraderGold:
         Fetch timeframe data with caching
         D1 updates once per day, H4 every 4 hours, H1 every hour
         """
+        # Build pair-specific cache key
+        cache_key = f"{self.pair}_{timeframe}"
+
         # Check cache first
-        cached_data = mtf_cache.get(timeframe)
+        cached_data = mtf_cache.get(cache_key)
         if cached_data is not None:
             return cached_data
 
         # Fetch fresh data
         data = await fetch_h1(self.pair, timeframe=timeframe)
 
-        # Store in cache
-        mtf_cache.set(timeframe, data)
+        # Store in cache with pair-specific key
+        mtf_cache.set(cache_key, data)
 
         return data
 

@@ -15,28 +15,33 @@ class MultiTimeframeCache:
     D1: Updates at 5pm NY (4pm CT, 9pm UTC) when daily candle closes
     H4: Updates every 4 hours on the 4H candle close
     H1: Updates every hour on the hour
+
+    Cache keys now include pair name: "XAUUSD_D1", "EURUSD_H4", etc.
     """
 
     def __init__(self):
-        self.cache = {
-            "D1": {"data": None, "last_update": None},
-            "H4": {"data": None, "last_update": None},
-            "H1": {"data": None, "last_update": None}
-        }
+        # Cache now uses "PAIR_TIMEFRAME" as key
+        self.cache = {}
 
-    def is_expired(self, timeframe: str) -> bool:
+    def is_expired(self, cache_key: str) -> bool:
         """
         Check if cached data has expired based on market times
         D1: Expires after 5pm NY (daily close)
         H4: Expires every 4 hours
         H1: Expires every hour
+
+        Args:
+            cache_key: Full cache key like "XAUUSD_D1" or "EURUSD_H4"
         """
-        cache_entry = self.cache.get(timeframe)
+        cache_entry = self.cache.get(cache_key)
         if not cache_entry or cache_entry["data"] is None or cache_entry["last_update"] is None:
             return True
 
         now = datetime.now(pytz.UTC)
         last_update = cache_entry["last_update"]
+
+        # Extract timeframe from cache_key (e.g., "XAUUSD_D1" -> "D1")
+        timeframe = cache_key.split("_")[-1] if "_" in cache_key else cache_key
 
         if timeframe == "D1":
             # Daily candle closes at 5pm NY = 9pm UTC (or 10pm UTC during winter)
@@ -100,20 +105,38 @@ class MultiTimeframeCache:
 
         return True
 
-    def get(self, timeframe: str):
-        """Get cached data if not expired"""
-        if self.is_expired(timeframe):
+    def get(self, cache_key: str):
+        """
+        Get cached data if not expired
+
+        Args:
+            cache_key: Full cache key like "XAUUSD_D1" or "EURUSD_H4"
+        """
+        if self.is_expired(cache_key):
             return None
-        return self.cache[timeframe]["data"]
+        return self.cache[cache_key]["data"]
 
-    def set(self, timeframe: str, data):
-        """Store data in cache"""
-        self.cache[timeframe]["data"] = data
-        self.cache[timeframe]["last_update"] = datetime.now(pytz.UTC)
+    def set(self, cache_key: str, data):
+        """
+        Store data in cache
 
-    def get_last_update(self, timeframe: str) -> Optional[datetime]:
-        """Get last update time for timeframe"""
-        return self.cache[timeframe].get("last_update")
+        Args:
+            cache_key: Full cache key like "XAUUSD_D1" or "EURUSD_H4"
+        """
+        if cache_key not in self.cache:
+            self.cache[cache_key] = {"data": None, "last_update": None}
+
+        self.cache[cache_key]["data"] = data
+        self.cache[cache_key]["last_update"] = datetime.now(pytz.UTC)
+
+    def get_last_update(self, cache_key: str) -> Optional[datetime]:
+        """
+        Get last update time for cache key
+
+        Args:
+            cache_key: Full cache key like "XAUUSD_D1" or "EURUSD_H4"
+        """
+        return self.cache.get(cache_key, {}).get("last_update")
 
     def get_next_update(self, timeframe: str) -> str:
         """
