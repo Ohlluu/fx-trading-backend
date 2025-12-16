@@ -2758,8 +2758,10 @@ class BearishProTraderEURUSD:
             trade_result = "SL_HIT"
 
         # Calculate current P&L (SHORT: profit when price goes down)
-        pnl_pips = entry - current_price
-        pnl_percent = (pnl_pips / entry) * 100 if entry > 0 else 0
+        # For EUR/USD: 1 pip = 0.0001 (4 decimal places)
+        pip_size = 0.0001
+        pnl_pips = (entry - current_price) / pip_size
+        pnl_percent = (pnl_pips * pip_size / entry) * 100 if entry > 0 else 0
 
         # Build trade progress status
         if trade_result == "SL_HIT":
