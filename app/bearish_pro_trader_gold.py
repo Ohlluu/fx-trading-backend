@@ -134,6 +134,20 @@ class BearishProTraderGold:
                 "grade": h1_setup.get("grade", "WAIT"),
                 "tradable": h1_setup.get("tradable", False),
 
+                # Entry state machine (NEW)
+                "setup_state": h1_setup.get("setup_state", "NO_TRADE"),
+                "entry_ready": h1_setup.get("entry_ready", False),
+                "entry_window": h1_setup.get("entry_window", "LATE"),
+                "distance_to_invalidation": h1_setup.get("distance_to_invalidation", 0),
+                "distance_to_zone": h1_setup.get("distance_to_zone", 0),
+                "trigger_time": h1_setup.get("trigger_time"),
+                "trigger_type": h1_setup.get("trigger_type"),
+                "zone_time": h1_setup.get("zone_time"),
+                "zone_price": h1_setup.get("zone_price"),
+                "invalidation_price": h1_setup.get("invalidation_price"),
+                "atr": h1_setup.get("atr"),
+                "state_reason": h1_setup.get("state_reason"),
+
                 # Step-by-step breakdown
                 "setup_steps": self._build_setup_steps(h1_setup, current_price, current_candle, h1_data),
 
@@ -895,6 +909,16 @@ class BearishProTraderGold:
 
         # Default: SCANNING
         grading = self._grade_setup(confluences)
+
+        # Add entry state for SCANNING too
+        entry_state_data = self._determine_entry_state(
+            confluences=confluences,
+            grading=grading,
+            current_price=current_price,
+            h1_data=last_candles,
+            structure=structure
+        )
+
         return {
             "detected": True,
             "pattern_type": "SCANNING",
@@ -909,7 +933,20 @@ class BearishProTraderGold:
             "has_confirmation": grading["has_confirmation"],
             "grade": grading["grade"],
             "tradable": grading["tradable"],
-            "description": "Scanning for professional setups..."
+            "description": "Scanning for professional setups...",
+            # Add state machine fields
+            "setup_state": entry_state_data["setup_state"],
+            "entry_ready": entry_state_data["entry_ready"],
+            "entry_window": entry_state_data["entry_window"],
+            "distance_to_invalidation": entry_state_data["distance_to_invalidation"],
+            "distance_to_zone": entry_state_data["distance_to_zone"],
+            "trigger_time": entry_state_data["trigger_time"],
+            "trigger_type": entry_state_data["trigger_type"],
+            "zone_time": entry_state_data["zone_time"],
+            "zone_price": entry_state_data["zone_price"],
+            "invalidation_price": entry_state_data["invalidation_price"],
+            "atr": entry_state_data["atr"],
+            "state_reason": entry_state_data["reason"]
         }
 
     def _dedupe_confluences(self, confluences: List[Dict]) -> Tuple[List[Dict], int]:
@@ -1018,6 +1055,293 @@ class BearishProTraderGold:
             "grade": grade,
             "tradable": grade in ["TRADE", "A+", "A", "B"]
         }
+
+    def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Average True Range (ATR)"""
+        if data is None or len(data) < period:
+            return 20.0  # Default fallback for Gold (20 pips)
+
+        high = data['high']
+        low = data['low']
+        close = data['close']
+
+        # True Range calculation
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=period).mean().iloc[-1]
+
+        return float(atr) if not pd.isna(atr) else 20.0
+
+    def _get_zone_from_confluences(self, confluences: List[Dict], current_price: float) -> Dict:
+        """
+        Extract zone information from confluences
+        Returns zone with bounds if available, otherwise midpoint
+        """
+        # Find ZONE_LOCATION confluences that counted
+        zone_confs = [c for c in confluences
+                     if c.get("group") == "ZONE_LOCATION"
+                     and c.get("counted_for_score") == True]
+
+        if not zone_confs:
+            # Fallback: find any zone (even if not counted)
+            zone_confs = [c for c in confluences if c.get("group") == "ZONE_LOCATION"]
+
+        if not zone_confs:
+            # No zone found - use current price as fallback
+            return {
+                "type": None,
+                "midpoint": current_price,
+                "top": current_price,
+                "bottom": current_price,
+                "has_bounds": False
+            }
+
+        # Use the closest zone to current price
+        closest_zone = min(zone_confs, key=lambda z: abs(current_price - z.get("midpoint", current_price)))
+
+        # Extract bounds if available
+        zone_type = closest_zone.get("type")
+        description = closest_zone.get("description", "")
+
+        # Try to parse bounds from description (e.g., "Order Block at $2450.00 ($2448.00-$2452.00)")
+        import re
+        bounds_match = re.search(r'\((\$[\d,]+\.[\d]+)-(\$[\d,]+\.[\d]+)\)', description)
+
+        if bounds_match:
+            bottom = float(bounds_match.group(1).replace('$', '').replace(',', ''))
+            top = float(bounds_match.group(2).replace('$', '').replace(',', ''))
+            midpoint = (top + bottom) / 2
+            has_bounds = True
+        else:
+            # No bounds - extract midpoint from description
+            midpoint_match = re.search(r'\$[\d,]+\.[\d]+', description)
+            if midpoint_match:
+                midpoint = float(midpoint_match.group(0).replace('$', '').replace(',', ''))
+            else:
+                midpoint = current_price
+
+            # Estimate bounds (±5 pips for Gold)
+            bottom = midpoint - 5.0
+            top = midpoint + 5.0
+            has_bounds = False
+
+        return {
+            "type": zone_type,
+            "midpoint": midpoint,
+            "top": top,
+            "bottom": bottom,
+            "has_bounds": has_bounds
+        }
+
+    def _calculate_invalidation_level(self, zone: Dict, direction: str = "BEARISH") -> float:
+        """
+        Calculate invalidation level (stop loss placement)
+        For bullish: below zone bottom
+        For bearish: above zone top
+        """
+        if direction == "BULLISH":
+            # Invalidation is below the zone
+            buffer = 2.0  # 2 pips buffer for Gold
+            return zone["bottom"] - buffer
+        else:
+            # Bearish: invalidation above zone
+            buffer = 2.0
+            return zone["top"] + buffer
+
+    def _get_trigger_info(self, confluences: List[Dict]) -> Dict:
+        """
+        Extract trigger information (type and timestamp)
+        Returns latest trigger if multiple exist
+        """
+        trigger_types = ["LIQUIDITY_GRAB", "BREAKOUT_RETEST"]
+        triggers = [c for c in confluences if c.get("type") in trigger_types]
+
+        if not triggers:
+            return {
+                "has_trigger": False,
+                "trigger_type": None,
+                "trigger_time": None,
+                "trigger_age_hours": None
+            }
+
+        # If multiple triggers, pick LIQUIDITY_GRAB first (higher priority)
+        liquidity_grabs = [t for t in triggers if t.get("type") == "LIQUIDITY_GRAB"]
+        breakout_retests = [t for t in triggers if t.get("type") == "BREAKOUT_RETEST"]
+
+        if liquidity_grabs:
+            trigger = liquidity_grabs[0]
+        elif breakout_retests:
+            trigger = breakout_retests[0]
+        else:
+            trigger = triggers[0]
+
+        # Estimate trigger age (we don't have exact timestamp, estimate from detection)
+        # For now, assume trigger is recent (0-1 hour old)
+        # TODO: Add actual timestamp tracking in pattern detection
+        trigger_age_hours = 0.5  # Conservative estimate
+
+        return {
+            "has_trigger": True,
+            "trigger_type": trigger.get("type"),
+            "trigger_time": datetime.now(pytz.UTC).isoformat(),  # Placeholder
+            "trigger_age_hours": trigger_age_hours
+        }
+
+    def _determine_entry_state(self, confluences: List[Dict], grading: Dict,
+                               current_price: float, h1_data: pd.DataFrame,
+                               structure: Dict) -> Dict:
+        """
+        Determine setup state and entry readiness
+
+        States:
+        - NO_TRADE: No valid location
+        - WATCH: Location exists but not tradeable quality yet
+        - SETUP: Strong location, waiting for trigger
+        - TRIGGERED: Trigger detected and validated (near zone + fresh)
+        - ENTRY_READY: Trigger + acceptable risk (actionable entry)
+        - LATE: Trigger but too far from zone/invalidation
+
+        Returns dict with setup_state, entry_ready, entry_window, distances, etc.
+        """
+        has_location = grading["has_location"]
+        has_trigger = grading["has_trigger"]
+        has_confirmation = grading["has_confirmation"]
+
+        # Calculate ATR for Gold
+        atr = self._calculate_atr(h1_data, period=14)
+
+        # Gold-specific thresholds
+        zone_distance_max = 0.20 * atr  # 20% of ATR
+        risk_distance_max = 0.50 * atr  # 50% of ATR
+
+        # Extract zone information
+        zone = self._get_zone_from_confluences(confluences, current_price)
+
+        # Calculate distance to zone
+        if current_price >= zone["bottom"] and current_price <= zone["top"]:
+            # Price is inside zone
+            distance_to_zone = 0.0
+            zone_proximity = "GOOD"
+        else:
+            # Price outside zone - measure to nearest boundary
+            if current_price < zone["bottom"]:
+                distance_to_zone = zone["bottom"] - current_price
+            else:
+                distance_to_zone = current_price - zone["top"]
+
+            # Classify proximity
+            if distance_to_zone <= zone_distance_max * 0.5:
+                zone_proximity = "GOOD"
+            elif distance_to_zone <= zone_distance_max:
+                zone_proximity = "OK"
+            else:
+                zone_proximity = "LATE"
+
+        # Calculate distance to invalidation
+        invalidation_level = self._calculate_invalidation_level(zone, direction="BULLISH")
+        distance_to_invalidation = abs(current_price - invalidation_level)
+
+        # Classify risk proximity
+        if distance_to_invalidation <= risk_distance_max * 0.6:
+            risk_proximity = "GOOD"
+        elif distance_to_invalidation <= risk_distance_max:
+            risk_proximity = "OK"
+        else:
+            risk_proximity = "LATE"
+
+        # Final entry_window (worst of zone and risk)
+        proximity_rank = {"GOOD": 0, "OK": 1, "LATE": 2}
+        if proximity_rank[zone_proximity] >= proximity_rank[risk_proximity]:
+            entry_window = zone_proximity
+        else:
+            entry_window = risk_proximity
+
+        # Get trigger info
+        trigger_info = self._get_trigger_info(confluences)
+        trigger_age_hours = trigger_info["trigger_age_hours"]
+        trigger_type = trigger_info["trigger_type"]
+
+        # Check trigger freshness
+        if trigger_info["has_trigger"]:
+            if trigger_type == "LIQUIDITY_GRAB":
+                freshness_max = 2.0  # 2 hours
+            else:  # BREAKOUT_RETEST
+                freshness_max = 4.0  # 4 hours
+
+            is_fresh = trigger_age_hours is None or trigger_age_hours <= freshness_max
+        else:
+            is_fresh = False
+
+        # STATE DETERMINATION LOGIC
+        # NO_TRADE: No location
+        if not has_location:
+            setup_state = "NO_TRADE"
+            entry_ready = False
+            reason = "No valid location identified"
+
+        # WATCH: Location exists but not tradeable quality
+        # Check for conflicts or vetos
+        elif structure.get("structure_type") == "BEARISH_CHOCH":
+            setup_state = "WATCH"
+            entry_ready = False
+            reason = "Location present but bearish CHoCH conflicts with bullish bias"
+
+        # SETUP: Location valid, waiting for trigger
+        elif has_location and not has_trigger:
+            setup_state = "SETUP"
+            entry_ready = False
+            reason = f"Strong location at ${zone['midpoint']:.2f}; waiting for trigger (liquidity grab or retest)"
+
+        # TRIGGERED: Trigger exists, checking validation
+        elif has_trigger:
+            # Validate trigger (near zone + fresh)
+            trigger_validated = (zone_proximity in ["GOOD", "OK"]) and is_fresh
+
+            if not trigger_validated:
+                # Trigger exists but invalid (stale or too far)
+                setup_state = "LATE"
+                entry_ready = False
+                if not is_fresh:
+                    reason = f"Trigger detected but stale ({trigger_age_hours:.1f}h ago)"
+                else:
+                    reason = f"Trigger detected but too far from zone ({distance_to_zone:.1f} pips away)"
+
+            # ENTRY_READY: Trigger validated + acceptable risk
+            elif entry_window in ["GOOD", "OK"]:
+                setup_state = "ENTRY_READY"
+                entry_ready = True
+                reason = f"{trigger_type} at zone ${zone['midpoint']:.2f} - entry actionable now"
+
+            # LATE: Trigger validated but risk too high
+            else:
+                setup_state = "LATE"
+                entry_ready = False
+                reason = f"Trigger validated but entry too far from invalidation ({distance_to_invalidation:.1f} pips)"
+
+        # Fallback
+        else:
+            setup_state = "WATCH"
+            entry_ready = False
+            reason = "Monitoring setup development"
+
+        return {
+            "setup_state": setup_state,
+            "entry_ready": entry_ready,
+            "entry_window": entry_window,
+            "distance_to_invalidation": round(distance_to_invalidation, 1),
+            "distance_to_zone": round(distance_to_zone, 1),
+            "trigger_time": trigger_info["trigger_time"],
+            "trigger_type": trigger_type,
+            "zone_time": None,  # TODO: Track when zone formed
+            "zone_price": round(zone["midpoint"], 2),
+            "invalidation_price": round(invalidation_level, 2),
+            "atr": round(atr, 1),
+            "reason": reason
+        }
+
 
     def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 10) -> bool:
         """
