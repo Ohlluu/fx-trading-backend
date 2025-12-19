@@ -89,7 +89,7 @@ class BullishProTraderGold:
             # Analyze market structure across timeframes (using REAL data)
             daily_analysis = self._analyze_daily_trend(d1_data, current_price)
             h4_levels = self._identify_key_levels_h4(h4_data, current_price)
-            h1_setup = await self._detect_setup_pattern(h1_data, h4_levels, current_price)
+            h1_setup = await self._detect_setup_pattern(h1_data, h4_data, h4_levels, current_price)
 
             # CHECK IF SETUP TRIGGERED (5+ confluence)
             # If yes, lock it in as active trade
@@ -602,7 +602,7 @@ class BullishProTraderGold:
 
         return {"detected": False, "score": 0}
 
-    async def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
+    async def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
         """
         Detect which professional setup patterns are forming
 
@@ -890,6 +890,16 @@ class BullishProTraderGold:
                 structure=structure
             )
 
+            # Add STEP 4: TRADE-WORTHINESS GATING (NEW)
+            trade_worthiness = self._assess_trade_worthiness(
+                entry_state_data=entry_state_data,
+                confluences=confluences,
+                h4_data=h4_data,
+                current_price=current_price,
+                grading=grading,
+                direction="BULLISH"
+            )
+
             # Add state machine fields to response
             primary_setup["setup_state"] = entry_state_data["setup_state"]
             primary_setup["entry_ready"] = entry_state_data["entry_ready"]
@@ -910,6 +920,21 @@ class BullishProTraderGold:
             primary_setup["bias_source"] = entry_state_data["bias_source"]
             primary_setup["bias_conflict"] = entry_state_data["bias_conflict"]
             primary_setup["conflicting_structure"] = entry_state_data["conflicting_structure"]
+
+            # Step 4: Trade-Worthiness fields (NEW)
+            primary_setup["trade_worthy"] = trade_worthiness["trade_worthy"]
+            primary_setup["trade_decision"] = trade_worthiness["trade_decision"]
+            primary_setup["decision_reason"] = trade_worthiness["decision_reason"]
+            primary_setup["entry_price"] = trade_worthiness["entry_price"]
+            primary_setup["stop_price"] = trade_worthiness["stop_price"]
+            primary_setup["targets"] = trade_worthiness["targets"]
+            primary_setup["tp_source"] = trade_worthiness["tp_source"]
+            primary_setup["rr"] = trade_worthiness["rr"]
+            primary_setup["risk_distance"] = trade_worthiness["risk_distance"]
+            primary_setup["reward_distance_tp1"] = trade_worthiness["reward_distance_tp1"]
+            primary_setup["reward_distance_tp2"] = trade_worthiness["reward_distance_tp2"]
+            primary_setup["stop_atr_multiple"] = trade_worthiness["stop_atr_multiple"]
+            primary_setup["gates"] = trade_worthiness["gates"]
 
             # Keep confidence for backward compatibility (ENTRY_READY > others)
             if entry_state_data["setup_state"] == "ENTRY_READY":
@@ -935,6 +960,16 @@ class BullishProTraderGold:
             current_price=current_price,
             h1_data=last_candles,
             structure=structure
+        )
+
+        # Add STEP 4: TRADE-WORTHINESS GATING for SCANNING too
+        trade_worthiness = self._assess_trade_worthiness(
+            entry_state_data=entry_state_data,
+            confluences=confluences,
+            h4_data=h4_data,
+            current_price=current_price,
+            grading=grading,
+            direction="BULLISH"
         )
 
         return {
@@ -971,7 +1006,21 @@ class BullishProTraderGold:
             "direction": entry_state_data["direction"],
             "bias_source": entry_state_data["bias_source"],
             "bias_conflict": entry_state_data["bias_conflict"],
-            "conflicting_structure": entry_state_data["conflicting_structure"]
+            "conflicting_structure": entry_state_data["conflicting_structure"],
+            # Step 4: Trade-Worthiness fields (NEW)
+            "trade_worthy": trade_worthiness["trade_worthy"],
+            "trade_decision": trade_worthiness["trade_decision"],
+            "decision_reason": trade_worthiness["decision_reason"],
+            "entry_price": trade_worthiness["entry_price"],
+            "stop_price": trade_worthiness["stop_price"],
+            "targets": trade_worthiness["targets"],
+            "tp_source": trade_worthiness["tp_source"],
+            "rr": trade_worthiness["rr"],
+            "risk_distance": trade_worthiness["risk_distance"],
+            "reward_distance_tp1": trade_worthiness["reward_distance_tp1"],
+            "reward_distance_tp2": trade_worthiness["reward_distance_tp2"],
+            "stop_atr_multiple": trade_worthiness["stop_atr_multiple"],
+            "gates": trade_worthiness["gates"]
         }
 
     def _dedupe_confluences(self, confluences: List[Dict]) -> Tuple[List[Dict], int]:
@@ -1425,6 +1474,294 @@ class BullishProTraderGold:
             "bias_source": bias_source,
             "bias_conflict": bias_conflict,
             "conflicting_structure": conflicting_structure
+        }
+
+    def _find_targets(self, current_price: float, confluences: List[Dict],
+                     h4_data: pd.DataFrame, direction: str) -> List[Dict]:
+        """
+        Find target levels for Step 4 trade worthiness
+
+        Returns ranked list of levels (nearest first) that serve as both:
+        - Potential take-profit targets
+        - Obstacles for feasibility checks
+
+        Order: opposing zones → swing extremes → ATR projection fallback
+        """
+        levels = []
+
+        # 1. Find opposing zones from confluences
+        if direction == "BULLISH":
+            # For longs, find SUPPLY zones above current price
+            opposing_types = ["SUPPLY_ZONE", "ORDER_BLOCK"]  # Opposing for bullish
+        else:
+            # For shorts, find DEMAND zones below current price
+            opposing_types = ["DEMAND_ZONE", "ORDER_BLOCK"]  # Opposing for bearish
+
+        for conf in confluences:
+            conf_type = conf.get("type")
+            if conf_type not in opposing_types:
+                continue
+
+            # Extract level from confluence
+            if direction == "BULLISH":
+                # For longs, use bottom of supply zone (first resistance)
+                level_price = conf.get("bottom") or conf.get("price")
+                if level_price and level_price > current_price:
+                    distance = level_price - current_price
+                    levels.append({
+                        "price": level_price,
+                        "distance": distance,
+                        "source": f"OPPOSING_{conf_type}",
+                        "type": "structure"
+                    })
+            else:
+                # For shorts, use top of demand zone (first support)
+                level_price = conf.get("top") or conf.get("price")
+                if level_price and level_price < current_price:
+                    distance = current_price - level_price
+                    levels.append({
+                        "price": level_price,
+                        "distance": distance,
+                        "source": f"OPPOSING_{conf_type}",
+                        "type": "structure"
+                    })
+
+        # 2. Find swing extremes from H4 data
+        if h4_data is not None and len(h4_data) >= 20:
+            recent_h4 = h4_data.tail(50)  # Look back 50 H4 candles
+
+            if direction == "BULLISH":
+                # Find recent swing highs above current price
+                for i in range(2, len(recent_h4) - 2):
+                    candle = recent_h4.iloc[i]
+                    prev1 = recent_h4.iloc[i-1]
+                    prev2 = recent_h4.iloc[i-2]
+                    next1 = recent_h4.iloc[i+1]
+                    next2 = recent_h4.iloc[i+2]
+
+                    # Swing high: higher than surrounding candles
+                    if (candle['high'] > prev1['high'] and
+                        candle['high'] > prev2['high'] and
+                        candle['high'] > next1['high'] and
+                        candle['high'] > next2['high'] and
+                        candle['high'] > current_price):
+
+                        distance = candle['high'] - current_price
+                        levels.append({
+                            "price": candle['high'],
+                            "distance": distance,
+                            "source": "H4_SWING_HIGH",
+                            "type": "swing"
+                        })
+            else:
+                # Find recent swing lows below current price
+                for i in range(2, len(recent_h4) - 2):
+                    candle = recent_h4.iloc[i]
+                    prev1 = recent_h4.iloc[i-1]
+                    prev2 = recent_h4.iloc[i-2]
+                    next1 = recent_h4.iloc[i+1]
+                    next2 = recent_h4.iloc[i+2]
+
+                    # Swing low: lower than surrounding candles
+                    if (candle['low'] < prev1['low'] and
+                        candle['low'] < prev2['low'] and
+                        candle['low'] < next1['low'] and
+                        candle['low'] < next2['low'] and
+                        candle['low'] < current_price):
+
+                        distance = current_price - candle['low']
+                        levels.append({
+                            "price": candle['low'],
+                            "distance": distance,
+                            "source": "H4_SWING_LOW",
+                            "type": "swing"
+                        })
+
+        # Sort by distance (nearest first) and deduplicate similar levels
+        if levels:
+            levels.sort(key=lambda x: x["distance"])
+
+            # Deduplicate: remove levels within 5 pips of each other, keep nearest
+            deduped = []
+            for level in levels:
+                # Check if similar level already exists
+                is_duplicate = False
+                for existing in deduped:
+                    if abs(level["price"] - existing["price"]) < 5.0:  # 5 pips for Gold
+                        is_duplicate = True
+                        break
+
+                if not is_duplicate:
+                    deduped.append(level)
+
+            return deduped[:3]  # Return max 3 targets
+
+        return []  # No structural targets found
+
+    def _assess_trade_worthiness(self, entry_state_data: Dict, confluences: List[Dict],
+                                 h4_data: pd.DataFrame, current_price: float,
+                                 grading: Dict, direction: str) -> Dict:
+        """
+        Step 4: Trade-worthiness gating (R:R + stop sanity + target feasibility)
+
+        Evaluates economic quality of ENTRY_READY setups:
+        - Gate 1: Stop Sanity (ATR-normalized stop width)
+        - Gate 2: Minimum R:R (economic justification)
+        - Gate 3: Target Feasibility (path-to-profit check)
+
+        Returns independent trade_worthy decision alongside Step 3 timing.
+        """
+        # Default: not assessed (only assess when ENTRY_READY or TRIGGERED)
+        if entry_state_data["setup_state"] not in ["ENTRY_READY", "TRIGGERED"]:
+            return {
+                "trade_worthy": False,
+                "trade_decision": "NOT_ASSESSED",
+                "decision_reason": f"Not assessed (state: {entry_state_data['setup_state']})",
+                "entry_price": None,
+                "stop_price": None,
+                "targets": {},
+                "rr": {},
+                "risk_distance": None,
+                "reward_distance_tp1": None,
+                "reward_distance_tp2": None,
+                "stop_atr_multiple": None,
+                "min_rr_required": 1.8,
+                "rr_passed": False,
+                "stop_sanity_passed": False,
+                "target_feasibility_passed": False
+            }
+
+        # Economic calculation uses REALITY (current price, not ideal)
+        entry_price = current_price
+        stop_price = entry_state_data["invalidation_price"]
+        atr = entry_state_data["atr"]
+
+        # Calculate risk distance
+        risk_distance = abs(entry_price - stop_price)
+
+        # Gate 1: Stop Sanity (Gold: <= 0.60 ATR)
+        stop_atr_multiple = risk_distance / atr if atr > 0 else 999
+        max_stop_atr = 0.60  # Gold threshold
+        stop_sanity_passed = stop_atr_multiple <= max_stop_atr
+
+        # Find targets (opposing zones, swings, or ATR projection)
+        structural_targets = self._find_targets(current_price, confluences, h4_data, direction)
+
+        # Determine if we can use ATR projection (stricter requirements)
+        can_use_atr_projection = (
+            grading["grade"] in ["TRADE", "A+"] and
+            stop_atr_multiple <= (max_stop_atr * 0.85) and  # 0.51 for Gold
+            entry_state_data["entry_window"] == "GOOD"
+        )
+
+        # Build target dict and compute R:R
+        targets = {}
+        rr = {}
+        reward_distance_tp1 = None
+        reward_distance_tp2 = None
+        tp_source = "NONE"
+
+        if structural_targets:
+            # Use structural targets
+            tp_source = "STRUCTURE"
+
+            if len(structural_targets) >= 1:
+                tp1_level = structural_targets[0]
+                targets["tp1"] = round(tp1_level["price"], 2)
+                targets["tp1_source"] = tp1_level["source"]
+                reward_distance_tp1 = tp1_level["distance"]
+                rr["to_tp1"] = round(reward_distance_tp1 / risk_distance, 2) if risk_distance > 0 else 0
+
+            if len(structural_targets) >= 2:
+                tp2_level = structural_targets[1]
+                targets["tp2"] = round(tp2_level["price"], 2)
+                targets["tp2_source"] = tp2_level["source"]
+                reward_distance_tp2 = tp2_level["distance"]
+                rr["to_tp2"] = round(reward_distance_tp2 / risk_distance, 2) if risk_distance > 0 else 0
+
+        elif can_use_atr_projection:
+            # ATR projection fallback (only for excellent setups)
+            tp_source = "ATR_PROJECTION"
+
+            # TP1: 1.5x stop distance
+            reward_distance_tp1 = 1.5 * risk_distance
+            if direction == "BULLISH":
+                targets["tp1"] = round(entry_price + reward_distance_tp1, 2)
+            else:
+                targets["tp1"] = round(entry_price - reward_distance_tp1, 2)
+            targets["tp1_source"] = "ATR_PROJECTION"
+            rr["to_tp1"] = 1.5
+
+            # TP2: 2.5x stop distance
+            reward_distance_tp2 = 2.5 * risk_distance
+            if direction == "BULLISH":
+                targets["tp2"] = round(entry_price + reward_distance_tp2, 2)
+            else:
+                targets["tp2"] = round(entry_price - reward_distance_tp2, 2)
+            targets["tp2_source"] = "ATR_PROJECTION"
+            rr["to_tp2"] = 2.5
+
+        # Gate 2: Minimum R:R (Gold: >= 1.8)
+        min_rr_required = 1.8
+        max_rr = max(rr.values()) if rr else 0
+        rr_passed = max_rr >= min_rr_required
+
+        # Gate 3: Target Feasibility (obstacle too close?)
+        target_feasibility_passed = True
+        feasibility_reason = None
+
+        if structural_targets:
+            # First target IS the first obstacle
+            first_obstacle_distance = structural_targets[0]["distance"]
+
+            # Fail if obstacle too close: <= max(0.15*ATR, 0.30*stop_distance)
+            min_clearance = max(0.15 * atr, 0.30 * risk_distance)
+
+            if first_obstacle_distance <= min_clearance:
+                target_feasibility_passed = False
+                feasibility_reason = f"First obstacle too close ({first_obstacle_distance:.1f} < {min_clearance:.1f} clearance)"
+
+        # Final Decision
+        all_gates_pass = stop_sanity_passed and rr_passed and target_feasibility_passed
+
+        if not stop_sanity_passed:
+            decision = "PASS"
+            decision_reason = f"Stop too wide vs ATR ({stop_atr_multiple:.2f}x > {max_stop_atr}x threshold)"
+            trade_worthy = False
+        elif not targets:
+            decision = "PASS"
+            decision_reason = "No valid targets found within reasonable distance"
+            trade_worthy = False
+        elif not rr_passed:
+            decision = "PASS"
+            decision_reason = f"R:R too low (best: {max_rr:.1f} < {min_rr_required} required)"
+            trade_worthy = False
+        elif not target_feasibility_passed:
+            decision = "PASS"
+            decision_reason = feasibility_reason
+            trade_worthy = False
+        else:
+            decision = "TAKE"
+            decision_reason = f"All gates passed (RR: {max_rr:.1f}, stop: {stop_atr_multiple:.2f}x ATR)"
+            trade_worthy = True
+
+        return {
+            "trade_worthy": trade_worthy,
+            "trade_decision": decision,
+            "decision_reason": decision_reason,
+            "entry_price": round(entry_price, 2),
+            "stop_price": round(stop_price, 2),
+            "targets": targets,
+            "tp_source": tp_source,
+            "rr": rr,
+            "risk_distance": round(risk_distance, 1),
+            "reward_distance_tp1": round(reward_distance_tp1, 1) if reward_distance_tp1 else None,
+            "reward_distance_tp2": round(reward_distance_tp2, 1) if reward_distance_tp2 else None,
+            "stop_atr_multiple": round(stop_atr_multiple, 2),
+            "min_rr_required": min_rr_required,
+            "rr_passed": rr_passed,
+            "stop_sanity_passed": stop_sanity_passed,
+            "target_feasibility_passed": target_feasibility_passed
         }
 
     def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 10) -> bool:
