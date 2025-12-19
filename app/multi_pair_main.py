@@ -306,7 +306,7 @@ async def read_root():
     """Serve the dashboard homepage"""
     html_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(html_path):
-        return FileResponse(html_path)
+        return FileResponse(html_path, media_type="text/html")
     return {"message": "FX Trading API - Dashboard not found. Access API at /docs"}
 
 @app.get("/api/xauusd/analysis")
