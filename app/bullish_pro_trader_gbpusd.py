@@ -675,8 +675,6 @@ class BullishProTraderGBPUSD:
                     "description": structure["description"]
                 })
             # else: BOS invalidated - don't add to confluences
-        else:
-            # Other structure types (CHOCH, etc.)
 
         # Add liquidity grab (highest priority)
         # NO stability check needed - based on completed historical candles
