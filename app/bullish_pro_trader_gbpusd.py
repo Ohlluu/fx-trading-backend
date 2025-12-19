@@ -132,6 +132,13 @@ class BullishProTraderGBPUSD:
                 "confidence": h1_setup.get("confidence", None),
                 "structure": h1_setup.get("structure", {"structure_type": "NEUTRAL", "score": 0}),
 
+                # GATED SCORING (Professional categorization)
+                "has_location": h1_setup.get("has_location", False),
+                "has_trigger": h1_setup.get("has_trigger", False),
+                "has_confirmation": h1_setup.get("has_confirmation", False),
+                "grade": h1_setup.get("grade", "NO_TRADE"),
+                "tradable": h1_setup.get("tradable", False),
+
                 # Step-by-step breakdown
                 "setup_steps": self._build_setup_steps(h1_setup, current_price, current_candle, h1_data),
 
@@ -882,6 +889,14 @@ class BullishProTraderGBPUSD:
             primary_setup["validation_warnings"] = validation_warnings
             primary_setup["candle_position"] = round(candle_position * 100, 1)
 
+            # Add GATED SCORING
+            gated_score = self._grade_setup(confluences)
+            primary_setup["has_location"] = gated_score["has_location"]
+            primary_setup["has_trigger"] = gated_score["has_trigger"]
+            primary_setup["has_confirmation"] = gated_score["has_confirmation"]
+            primary_setup["grade"] = gated_score["grade"]
+            primary_setup["tradable"] = gated_score["tradable"]
+
             # ENTRY STATE SYSTEM: Replace confidence with clear entry states
             entry_state_data = self._determine_entry_state(
                 total_score=total_score,
@@ -909,6 +924,8 @@ class BullishProTraderGBPUSD:
             return primary_setup
 
         # Default: SCANNING
+        # Add GATED SCORING for SCANNING state
+        gated_score = self._grade_setup(confluences)
         return {
             "detected": True,
             "pattern_type": "SCANNING",
@@ -918,7 +935,12 @@ class BullishProTraderGBPUSD:
             "confluences": confluences,
             "total_score": total_score,
             "structure": structure,
-            "description": "Scanning for professional setups..."
+            "description": "Scanning for professional setups...",
+            "has_location": gated_score["has_location"],
+            "has_trigger": gated_score["has_trigger"],
+            "has_confirmation": gated_score["has_confirmation"],
+            "grade": gated_score["grade"],
+            "tradable": gated_score["tradable"]
         }
 
     def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 10) -> bool:
@@ -968,6 +990,64 @@ class BullishProTraderGBPUSD:
         time_stable = (now_utc - tracked["first_seen"]).total_seconds() / 60  # minutes
 
         return time_stable >= stability_minutes
+
+    def _grade_setup(self, confluences: List[Dict]) -> Dict:
+        """
+        Grade setup using GATED SCORING system
+
+        Professional traders categorize signals:
+        - LOCATION: Where to enter (ORDER_BLOCK, DEMAND_ZONE)
+        - TRIGGER: Why enter now (LIQUIDITY_GRAB, BREAKOUT_RETEST)
+        - CONFIRMATION: Is it moving? (BULLISH_BOS, BULLISH_CHOCH)
+
+        Grades:
+        - NO_TRADE: No location identified
+        - WAIT: Only location (no trigger/confirmation)
+        - B: Location + confirmation (but no trigger)
+        - TRADE: Location + trigger (ready to trade)
+        - A+: All three categories present (best setup)
+
+        Returns:
+            Dict with has_location, has_trigger, has_confirmation, grade, tradable
+        """
+        has_location = False
+        has_trigger = False
+        has_confirmation = False
+
+        # Define categories
+        location_types = ["ORDER_BLOCK", "DEMAND_ZONE"]
+        trigger_types = ["LIQUIDITY_GRAB", "BREAKOUT_RETEST"]
+        confirmation_types = ["BULLISH_BOS", "BULLISH_CHOCH"]
+
+        # Categorize confluences
+        for conf in confluences:
+            conf_type = conf.get("type", "")
+            if conf_type in location_types:
+                has_location = True
+            if conf_type in trigger_types:
+                has_trigger = True
+            if conf_type in confirmation_types:
+                has_confirmation = True
+
+        # Determine grade using gated logic
+        if not has_location:
+            grade = "NO_TRADE"
+        elif has_location and has_trigger and has_confirmation:
+            grade = "A+"
+        elif has_location and has_trigger:
+            grade = "TRADE"
+        elif has_location and has_confirmation:
+            grade = "B"
+        else:
+            grade = "WAIT"
+
+        return {
+            "has_location": has_location,
+            "has_trigger": has_trigger,
+            "has_confirmation": has_confirmation,
+            "grade": grade,
+            "tradable": grade in ["TRADE", "A+", "A", "B"]
+        }
 
     def _determine_entry_state(self, total_score: int, adjusted_score: int, validation_warnings: List[str],
                                candle_position: float, candle_is_bearish: bool) -> Dict[str, Any]:
