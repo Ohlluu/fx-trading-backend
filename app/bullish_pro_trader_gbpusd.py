@@ -81,7 +81,7 @@ class BullishProTraderGBPUSD:
             if self.active_trade is not None:
                 # Get current candle info FIRST
                 current_candle = await self._get_current_candle_info(h1_data, current_price)
-                trade_status = self._monitor_active_trade(current_price, current_candle)
+                trade_status = self._monitor_active_trade(h1_data, current_price, current_candle)
 
                 # If trade is still active, return trade monitoring data
                 if trade_status["is_active"]:
@@ -103,13 +103,17 @@ class BullishProTraderGBPUSD:
                 trade_plan = self._build_trade_plan(h1_setup, h4_levels, current_price)
                 if trade_plan.get("status") == "Ready":
                     # Save as active trade (in memory AND file)
+                    entry_price = float(trade_plan["entry_price"].replace("$", "").replace(",", ""))
                     self.active_trade = {
                         "setup": h1_setup,
                         "trade_plan": trade_plan,
                         "triggered_at": datetime.now(pytz.UTC).isoformat(),
-                        "entry": float(trade_plan["entry_price"].replace("$", "").replace(",", "")),
+                        "entry": entry_price,
                         "h4_levels": h4_levels,
-                        "daily_analysis": daily_analysis
+                        "daily_analysis": daily_analysis,
+                        # Step 6: Max favorable excursion tracking
+                        "max_favorable_price": entry_price,
+                        "early_exit_triggered": False
                     }
                     # Persist to file so it survives across API calls
                     self._save_active_trade()
@@ -3337,10 +3341,11 @@ class BullishProTraderGBPUSD:
             }
         }
 
-    def _monitor_active_trade(self, current_price: float, current_candle: Dict = None) -> Dict[str, Any]:
+    def _monitor_active_trade(self, h1_data: pd.DataFrame, current_price: float, current_candle: Dict = None) -> Dict[str, Any]:
         """
         Monitor an active trade's progress toward TP/SL
         Don't re-validate confluences - just track price vs targets
+        Includes Step 6: Early exit detection (opposite structure + dead trade)
         """
         if self.active_trade is None:
             return {"is_active": False}
@@ -3395,6 +3400,11 @@ class BullishProTraderGBPUSD:
             trade_result = "TP1_HIT"
         elif candle_low <= sl:
             trade_result = "SL_HIT"
+
+        # STEP 6: Check for early exit (only if TP/SL not hit)
+        early_exit_data = {}
+        if trade_result is None:
+            early_exit_data = self._check_early_exit(h1_data, current_price)
 
         # Calculate current P&L
         pnl_pips = current_price - entry
@@ -3495,6 +3505,15 @@ class BullishProTraderGBPUSD:
                 "key_levels": h4_levels,
                 "current_price": current_price
             },
+
+            # STEP 6: Early exit detection
+            "early_exit": early_exit_data.get("early_exit", False),
+            "exit_type": early_exit_data.get("exit_type"),
+            "exit_reason": early_exit_data.get("exit_reason"),
+            "exit_price": early_exit_data.get("exit_price"),
+            "recommended_action": early_exit_data.get("recommended_action"),
+            "max_r": early_exit_data.get("max_r"),
+            "trade_age_hours": early_exit_data.get("trade_age_hours"),
 
             "last_update": datetime.now(pytz.UTC).isoformat()
         }
@@ -3953,6 +3972,212 @@ class BullishProTraderGBPUSD:
             "setup_status": "ERROR",
             "setup_steps": [],
             "last_update": datetime.now(pytz.UTC).isoformat()
+        }
+
+    def _check_opposite_structure(self, h1_data: pd.DataFrame, direction: str, entry_time: datetime) -> Dict:
+        """
+        Step 6 - Exit Rule 1: Opposite Structure Detection
+
+        For LONG trades: exit if BEARISH_CHOCH or BEARISH_BOS appears
+        For SHORT trades: exit if BULLISH_CHOCH or BULLISH_BOS appears
+
+        Uses close-based structure confirmation (not just wicks)
+        Must be detected AFTER entry
+        """
+        if h1_data is None or len(h1_data) < 10:
+            return {"opposite_structure_detected": False}
+
+        # Detect structure shift on H1
+        structure = self._detect_structure_shift(h1_data)
+
+        if not structure.get("structure_detected"):
+            return {"opposite_structure_detected": False}
+
+        structure_type = structure.get("structure_type")
+        structure_time_str = structure.get("structure_time")
+
+        # Check if structure formed after entry
+        if structure_time_str:
+            try:
+                structure_time = datetime.fromisoformat(structure_time_str.replace('Z', '+00:00'))
+                if structure_time <= entry_time:
+                    # Structure formed before entry, ignore
+                    return {"opposite_structure_detected": False}
+            except:
+                pass  # Can't parse time, assume it's new
+
+        # Check for opposite structure based on trade direction
+        if direction == "BULLISH":
+            # LONG trade - exit if bearish structure appears
+            if structure_type in ["BEARISH_CHOCH", "BEARISH_BOS"]:
+                return {
+                    "opposite_structure_detected": True,
+                    "structure_type": structure_type,
+                    "exit_reason": f"Opposite structure detected: {structure_type} invalidates LONG bias"
+                }
+        elif direction == "BEARISH":
+            # SHORT trade - exit if bullish structure appears
+            if structure_type in ["BULLISH_CHOCH", "BULLISH_BOS"]:
+                return {
+                    "opposite_structure_detected": True,
+                    "structure_type": structure_type,
+                    "exit_reason": f"Opposite structure detected: {structure_type} invalidates SHORT bias"
+                }
+
+        return {"opposite_structure_detected": False}
+
+    def _check_dead_trade(self, entry_price: float, stop_price: float,
+                         max_favorable_price: float, trade_age_hours: float,
+                         direction: str, time_limit_hours: float = 12.0,
+                         min_progress_r: float = 0.3) -> Dict:
+        """
+        Step 6 - Exit Rule 2: Dead Trade Detection
+
+        A trade is dead if:
+        - Trade age >= time_limit_hours
+        - AND max_r < min_progress_r (default 0.3R)
+
+        Defaults for FX (GBP/USD): 12 hours, 0.3R minimum progress
+        """
+        risk = abs(entry_price - stop_price)
+
+        if risk == 0:
+            return {"dead_trade_detected": False}
+
+        # Calculate max R achieved
+        if direction == "BULLISH":
+            max_r = (max_favorable_price - entry_price) / risk
+        else:  # BEARISH
+            max_r = (entry_price - max_favorable_price) / risk
+
+        # Check dead trade conditions
+        if trade_age_hours >= time_limit_hours and max_r < min_progress_r:
+            return {
+                "dead_trade_detected": True,
+                "max_r": round(max_r, 2),
+                "trade_age_hours": round(trade_age_hours, 1),
+                "exit_reason": f"Dead trade – no momentum after {trade_age_hours:.1f}h (max {max_r:.2f}R < {min_progress_r}R)"
+            }
+
+        return {
+            "dead_trade_detected": False,
+            "max_r": round(max_r, 2),
+            "trade_age_hours": round(trade_age_hours, 1)
+        }
+
+    def _check_early_exit(self, h1_data: pd.DataFrame, current_price: float) -> Dict:
+        """
+        Step 6: Early Exit Detection
+
+        Checks both exit rules:
+        1. Opposite structure (hard exit)
+        2. Dead trade (soft exit)
+
+        Returns exit recommendation if either triggers
+        """
+        if self.active_trade is None:
+            return {"early_exit": False}
+
+        # Get trade details
+        entry_price = self.active_trade.get("entry")
+        trade_plan = self.active_trade.get("trade_plan", {})
+        setup = self.active_trade.get("setup", {})
+        direction = setup.get("direction", "BULLISH")
+
+        sl_str = trade_plan.get("stop_loss", {}).get("price", "$0")
+        stop_price = float(sl_str.replace("$", "").replace(",", ""))
+
+        # Get or initialize max favorable tracking
+        max_favorable_price = self.active_trade.get("max_favorable_price")
+        if max_favorable_price is None:
+            max_favorable_price = entry_price
+
+        # Update max favorable price
+        if direction == "BULLISH":
+            max_favorable_price = max(max_favorable_price, current_price)
+        else:  # BEARISH
+            max_favorable_price = min(max_favorable_price, current_price)
+
+        # Save updated max favorable
+        self.active_trade["max_favorable_price"] = max_favorable_price
+
+        # Calculate trade age
+        triggered_at_str = self.active_trade.get("triggered_at")
+        if triggered_at_str:
+            triggered_at = datetime.fromisoformat(triggered_at_str)
+            now_utc = datetime.now(pytz.UTC)
+            trade_age_hours = (now_utc - triggered_at).total_seconds() / 3600
+        else:
+            trade_age_hours = 0
+
+        # Check if early exit already triggered (advisory mode)
+        if self.active_trade.get("early_exit_triggered"):
+            # Already flagged, continue returning the recommendation
+            return {
+                "early_exit": True,
+                "exit_type": self.active_trade.get("early_exit_type"),
+                "exit_reason": self.active_trade.get("early_exit_reason"),
+                "exit_price": current_price,
+                "recommended_action": "EXIT_AT_MARKET",
+                "already_flagged": True
+            }
+
+        # EXIT RULE 1: Check for opposite structure
+        opposite_check = self._check_opposite_structure(h1_data, direction, triggered_at)
+        if opposite_check.get("opposite_structure_detected"):
+            # Flag the early exit (advisory mode)
+            self.active_trade["early_exit_triggered"] = True
+            self.active_trade["early_exit_triggered_at"] = datetime.now(pytz.UTC).isoformat()
+            self.active_trade["early_exit_type"] = "OPPOSITE_STRUCTURE"
+            self.active_trade["early_exit_reason"] = opposite_check["exit_reason"]
+            self._save_active_trade()
+
+            return {
+                "early_exit": True,
+                "exit_type": "OPPOSITE_STRUCTURE",
+                "exit_reason": opposite_check["exit_reason"],
+                "structure_type": opposite_check.get("structure_type"),
+                "exit_price": current_price,
+                "recommended_action": "EXIT_AT_MARKET"
+            }
+
+        # EXIT RULE 2: Check for dead trade
+        dead_trade_check = self._check_dead_trade(
+            entry_price=entry_price,
+            stop_price=stop_price,
+            max_favorable_price=max_favorable_price,
+            trade_age_hours=trade_age_hours,
+            direction=direction,
+            time_limit_hours=12.0,  # FX threshold (GBP/USD)
+            min_progress_r=0.3
+        )
+
+        if dead_trade_check.get("dead_trade_detected"):
+            # Flag the early exit (advisory mode)
+            self.active_trade["early_exit_triggered"] = True
+            self.active_trade["early_exit_triggered_at"] = datetime.now(pytz.UTC).isoformat()
+            self.active_trade["early_exit_type"] = "DEAD_TRADE"
+            self.active_trade["early_exit_reason"] = dead_trade_check["exit_reason"]
+            self._save_active_trade()
+
+            return {
+                "early_exit": True,
+                "exit_type": "DEAD_TRADE",
+                "exit_reason": dead_trade_check["exit_reason"],
+                "max_r": dead_trade_check.get("max_r"),
+                "trade_age_hours": dead_trade_check.get("trade_age_hours"),
+                "exit_price": current_price,
+                "recommended_action": "EXIT_AT_MARKET"
+            }
+
+        # No early exit triggered
+        # Save updated max favorable price
+        self._save_active_trade()
+
+        return {
+            "early_exit": False,
+            "max_r": dead_trade_check.get("max_r"),
+            "trade_age_hours": dead_trade_check.get("trade_age_hours")
         }
 
 
