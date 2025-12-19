@@ -904,35 +904,63 @@ class BearishProTraderGBPUSD:
             primary_setup["grade"] = gated_score["grade"]
             primary_setup["tradable"] = gated_score["tradable"]
 
-            # ENTRY STATE SYSTEM: Replace confidence with clear entry states
+            # ENTRY STATE SYSTEM: Determine entry timing (state machine)
             entry_state_data = self._determine_entry_state(
-                total_score=total_score,
-                adjusted_score=adjusted_score,
-                validation_warnings=validation_warnings,
-                candle_position=candle_position,
-                candle_is_bullish=candle_is_bullish
+                confluences=confluences,
+                grading=gated_score,
+                current_price=current_price,
+                h1_data=last_candles,
+                structure=structure
             )
 
-            primary_setup["entry_state"] = entry_state_data["entry_state"]
-            primary_setup["entry_signal"] = entry_state_data["entry_signal"]
-            primary_setup["state_description"] = entry_state_data["state_description"]
-            primary_setup["time_in_state_minutes"] = entry_state_data.get("time_in_state_minutes", 0)
+            # Add state machine fields to response
+            primary_setup["setup_state"] = entry_state_data["setup_state"]
+            primary_setup["entry_ready"] = entry_state_data["entry_ready"]
+            primary_setup["entry_window"] = entry_state_data["entry_window"]
+            primary_setup["distance_to_invalidation"] = entry_state_data["distance_to_invalidation"]
+            primary_setup["distance_to_zone"] = entry_state_data["distance_to_zone"]
+            primary_setup["trigger_time"] = entry_state_data["trigger_time"]
+            primary_setup["trigger_type"] = entry_state_data["trigger_type"]
+            primary_setup["trigger_validated"] = entry_state_data["trigger_validated"]
+            primary_setup["trigger_validation_reason"] = entry_state_data["trigger_validation_reason"]
+            primary_setup["zone_time"] = entry_state_data["zone_time"]
+            primary_setup["zone_price"] = entry_state_data["zone_price"]
+            primary_setup["invalidation_price"] = entry_state_data["invalidation_price"]
+            primary_setup["atr"] = entry_state_data["atr"]
+            primary_setup["state_reason"] = entry_state_data["reason"]
+            # Bias fields (deterministic)
+            primary_setup["direction"] = entry_state_data["direction"]
+            primary_setup["bias_source"] = entry_state_data["bias_source"]
+            primary_setup["bias_conflict"] = entry_state_data["bias_conflict"]
+            primary_setup["conflicting_structure"] = entry_state_data["conflicting_structure"]
 
-            # Keep confidence for backward compatibility but make it match entry state
-            if entry_state_data["entry_state"] == "🚀 STRONG ENTRY":
-                primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME"
-            elif entry_state_data["entry_state"] == "✅ READY TO ENTER":
-                primary_setup["confidence"] = "⭐️⭐️ HIGH" if adjusted_score >= 7 else "⭐️ MODERATE"
-            elif entry_state_data["entry_state"] == "⏳ SETUP FORMING":
-                primary_setup["confidence"] = "⏳ FORMING (wait for entry)"
-            else:  # SCANNING
-                primary_setup["confidence"] = "🔍 SCANNING"
+            # Confidence hierarchy (ENTRY_READY > TRIGGERED > SETUP > WATCH > NO_TRADE/LATE)
+            if entry_state_data["setup_state"] == "ENTRY_READY":
+                primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME"  # Most urgent
+            elif entry_state_data["setup_state"] == "TRIGGERED":
+                primary_setup["confidence"] = "⭐️⭐️ HIGH"  # Trigger validated, checking risk
+            elif entry_state_data["setup_state"] == "SETUP":
+                primary_setup["confidence"] = "⭐️ MODERATE"  # Good location, waiting for trigger
+            elif entry_state_data["setup_state"] == "WATCH":
+                primary_setup["confidence"] = "⏳ WATCH (monitoring)"  # Concerns present
+            else:  # NO_TRADE, LATE
+                primary_setup["confidence"] = "❌ NOT TRADABLE"  # No entry or too late
 
             return primary_setup
 
         # Default: SCANNING
         # Add GATED SCORING for SCANNING state
         gated_score = self._grade_setup(confluences)
+
+        # Add entry state for SCANNING too
+        entry_state_data = self._determine_entry_state(
+            confluences=confluences,
+            grading=gated_score,
+            current_price=current_price,
+            h1_data=last_candles,
+            structure=structure
+        )
+
         return {
             "detected": True,
             "pattern_type": "SCANNING",
@@ -947,7 +975,27 @@ class BearishProTraderGBPUSD:
             "has_trigger": gated_score["has_trigger"],
             "has_confirmation": gated_score["has_confirmation"],
             "grade": gated_score["grade"],
-            "tradable": gated_score["tradable"]
+            "tradable": gated_score["tradable"],
+            # Add state machine fields
+            "setup_state": entry_state_data["setup_state"],
+            "entry_ready": entry_state_data["entry_ready"],
+            "entry_window": entry_state_data["entry_window"],
+            "distance_to_invalidation": entry_state_data["distance_to_invalidation"],
+            "distance_to_zone": entry_state_data["distance_to_zone"],
+            "trigger_time": entry_state_data["trigger_time"],
+            "trigger_type": entry_state_data["trigger_type"],
+            "trigger_validated": entry_state_data["trigger_validated"],
+            "trigger_validation_reason": entry_state_data["trigger_validation_reason"],
+            "zone_time": entry_state_data["zone_time"],
+            "zone_price": entry_state_data["zone_price"],
+            "invalidation_price": entry_state_data["invalidation_price"],
+            "atr": entry_state_data["atr"],
+            "state_reason": entry_state_data["reason"],
+            # Bias fields (deterministic)
+            "direction": entry_state_data["direction"],
+            "bias_source": entry_state_data["bias_source"],
+            "bias_conflict": entry_state_data["bias_conflict"],
+            "conflicting_structure": entry_state_data["conflicting_structure"]
         }
 
     def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 10) -> bool:
@@ -1260,93 +1308,194 @@ class BearishProTraderGBPUSD:
             "trigger_age_hours": trigger_age_hours
         }
 
-    def _determine_entry_state(self, total_score: int, adjusted_score: int, validation_warnings: List[str],
-                               candle_position: float, candle_is_bullish: bool) -> Dict[str, Any]:
+    def _determine_entry_state(self, confluences: List[Dict], grading: Dict,
+                               current_price: float, h1_data: pd.DataFrame,
+                               structure: Dict) -> Dict:
         """
-        Determine clear entry state based on score and price action (BEARISH TRADER)
+        Determine setup state and entry readiness (BEARISH TRADER)
 
         States:
-        - 🔍 SCANNING: < 5 points, looking for patterns
-        - ⏳ SETUP FORMING: 5-6 points, patterns detected but not ready
-        - ✅ READY TO ENTER: 7+ points, bearish candle, good position
-        - 🚀 STRONG ENTRY: 10+ points, perfect conditions
+        - NO_TRADE: No valid location
+        - WATCH: Location exists but not tradeable quality yet
+        - SETUP: Strong location, waiting for trigger
+        - TRIGGERED: Trigger detected and validated (near zone + fresh)
+        - ENTRY_READY: Trigger + acceptable risk (actionable entry)
+        - LATE: Trigger but too far from zone/invalidation
 
-        Returns:
-            Dict with entry_state, entry_signal, state_description
+        Returns dict with setup_state, entry_ready, entry_window, distances, etc.
         """
-        now_utc = datetime.now(pytz.UTC)
+        has_location = grading["has_location"]
+        has_trigger = grading["has_trigger"]
+        has_confirmation = grading["has_confirmation"]
 
-        # Determine base state from score
-        if adjusted_score < 5:
-            new_state = "🔍 SCANNING"
-            entry_signal = False
-            description = f"Looking for setups (need {5 - adjusted_score} more points)"
+        # Calculate ATR for EUR/USD
+        atr = self._calculate_atr(h1_data, period=14)
 
-        elif adjusted_score >= 5 and adjusted_score < 7:
-            # Check price action for entry readiness (BEARISH: want bullish candle=bad, position at highs=bad)
-            if candle_is_bullish or candle_position > 60:  # For bearish, high position is weak
-                new_state = "⏳ SETUP FORMING"
-                entry_signal = False
-                description = f"Setup detected ({adjusted_score} points) - waiting for bearish confirmation"
+        # EUR/USD-specific thresholds (FX pairs: more lenient than Gold)
+        zone_distance_max = 0.25 * atr  # 25% of ATR
+        risk_distance_max = 0.60 * atr  # 60% of ATR
+
+        # Extract zone information
+        zone = self._get_zone_from_confluences(confluences, current_price)
+
+        # Calculate distance to zone
+        if current_price >= zone["bottom"] and current_price <= zone["top"]:
+            # Price is inside zone
+            distance_to_zone = 0.0
+            zone_proximity = "GOOD"
+        else:
+            # Price outside zone - measure to nearest boundary
+            if current_price < zone["bottom"]:
+                distance_to_zone = zone["bottom"] - current_price
             else:
-                # Borderline - moderate confidence with good price action
-                new_state = "✅ READY TO ENTER"
-                entry_signal = True
-                description = f"Entry conditions met ({adjusted_score} points, moderate confidence)"
+                distance_to_zone = current_price - zone["top"]
 
-        elif adjusted_score >= 7 and adjusted_score < 10:
-            # Check price action for entry readiness
-            if candle_is_bullish or candle_position > 70:  # For bearish, very high position is weak
-                new_state = "⏳ SETUP FORMING"
-                entry_signal = False
-                description = f"Strong setup ({adjusted_score} points) - waiting for price confirmation"
+            # Convert to pips for readability
+            distance_to_zone = self._to_pips(distance_to_zone)
+
+            # Classify proximity
+            if distance_to_zone <= self._to_pips(zone_distance_max * 0.5):
+                zone_proximity = "GOOD"
+            elif distance_to_zone <= self._to_pips(zone_distance_max):
+                zone_proximity = "OK"
             else:
-                new_state = "✅ READY TO ENTER"
-                entry_signal = True
-                description = f"High confidence entry ({adjusted_score} points, good price action)"
+                zone_proximity = "LATE"
 
-        else:  # 10+ points
-            # Check price action
-            if candle_is_bullish or candle_position > 70:
-                new_state = "⏳ SETUP FORMING"
-                entry_signal = False
-                description = f"Extreme setup ({adjusted_score} points) - waiting for bearish candle"
+        # Calculate distance to invalidation
+        invalidation_level = self._calculate_invalidation_level(zone, direction="BEARISH")
+        distance_to_invalidation = abs(current_price - invalidation_level)
+        distance_to_invalidation_pips = self._to_pips(distance_to_invalidation)
+
+        # Classify risk proximity
+        if distance_to_invalidation <= risk_distance_max * 0.6:
+            risk_proximity = "GOOD"
+        elif distance_to_invalidation <= risk_distance_max:
+            risk_proximity = "OK"
+        else:
+            risk_proximity = "LATE"
+
+        # Final entry_window (worst of zone and risk)
+        proximity_rank = {"GOOD": 0, "OK": 1, "LATE": 2}
+        if proximity_rank[zone_proximity] >= proximity_rank[risk_proximity]:
+            entry_window = zone_proximity
+        else:
+            entry_window = risk_proximity
+
+        # Get trigger info
+        trigger_info = self._get_trigger_info(confluences)
+        trigger_age_hours = trigger_info["trigger_age_hours"]
+        trigger_type = trigger_info["trigger_type"]
+
+        # Determine bias conflict (deterministic)
+        direction = "BEARISH"
+        bias_conflict = False
+        bias_source = "STRUCTURE_SHIFT"
+        conflicting_structure = None
+
+        if structure.get("structure_type") in ["BULLISH_CHOCH", "BULLISH_BOS"]:
+            bias_conflict = True
+            conflicting_structure = structure.get("structure_type")
+
+        # Check trigger freshness with None handling
+        if trigger_info["has_trigger"]:
+            if trigger_type == "LIQUIDITY_GRAB":
+                freshness_max = 2.0  # 2 hours
+            else:  # BREAKDOWN_RETEST
+                freshness_max = 4.0  # 4 hours
+
+            # None handling: if timestamp missing, mark as not fresh
+            if trigger_age_hours is None:
+                is_fresh = False
+                freshness_reason = "Trigger time unknown; skipping freshness gate"
+            elif trigger_age_hours <= freshness_max:
+                is_fresh = True
+                freshness_reason = f"Trigger fresh ({trigger_age_hours:.1f}h old, max {freshness_max}h)"
             else:
-                new_state = "🚀 STRONG ENTRY"
-                entry_signal = True
-                description = f"STRONG ENTRY SIGNAL ({adjusted_score} points, excellent conditions)"
+                is_fresh = False
+                freshness_reason = f"Trigger stale ({trigger_age_hours:.1f}h old, max {freshness_max}h)"
+        else:
+            is_fresh = False
+            freshness_reason = "No trigger detected"
 
-        # STABILITY CHECK: Prevent state flickering
-        # Once in READY or STRONG state, stay there for minimum 5 minutes unless score drops significantly
-        if self.pattern_tracker["last_entry_state"] in ["✅ READY TO ENTER", "🚀 STRONG ENTRY"]:
-            if self.pattern_tracker["entry_state_since"]:
-                time_in_state = (now_utc - self.pattern_tracker["entry_state_since"]).total_seconds() / 60
+        # Validate trigger: fresh + near zone
+        trigger_validated = False
+        trigger_validation_reason = ""
 
-                # If we've been in entry state < 5 minutes and new state is not entry, stay in entry state
-                # UNLESS score dropped below 5 (setup actually failed)
-                if time_in_state < 5 and new_state in ["⏳ SETUP FORMING"] and adjusted_score >= 5:
-                    # Keep previous entry state (prevents flickering)
-                    return {
-                        "entry_state": self.pattern_tracker["last_entry_state"],
-                        "entry_signal": True,
-                        "state_description": description + " (entry active)",
-                        "time_in_state_minutes": round(time_in_state, 1)
-                    }
+        if not has_trigger:
+            trigger_validated = False
+            trigger_validation_reason = "No trigger detected"
+        elif not is_fresh:
+            trigger_validated = False
+            trigger_validation_reason = freshness_reason
+        elif zone_proximity == "LATE":
+            trigger_validated = False
+            trigger_validation_reason = f"Trigger too far from zone ({distance_to_zone:.1f} pips away)"
+        else:
+            trigger_validated = True
+            trigger_validation_reason = f"Fresh {trigger_type} at zone ({zone_proximity} proximity)"
 
-        # Update state tracking
-        if new_state != self.pattern_tracker["last_entry_state"]:
-            self.pattern_tracker["last_entry_state"] = new_state
-            self.pattern_tracker["entry_state_since"] = now_utc
+        # STATE DETERMINATION LOGIC (Clear separation)
+        # NO_TRADE: No location
+        if not has_location:
+            setup_state = "NO_TRADE"
+            entry_ready = False
+            reason = "No valid location identified"
 
-        time_in_state = 0
-        if self.pattern_tracker["entry_state_since"]:
-            time_in_state = (now_utc - self.pattern_tracker["entry_state_since"]).total_seconds() / 60
+        # WATCH: Location exists but bias conflict
+        elif bias_conflict:
+            setup_state = "WATCH"
+            entry_ready = False
+            reason = f"Location present but {conflicting_structure} conflicts with {direction} bias"
+
+        # SETUP: Location valid, waiting for trigger
+        elif has_location and not has_trigger:
+            setup_state = "SETUP"
+            entry_ready = False
+            reason = f"Strong location at ${zone['midpoint']:.5f}; waiting for trigger (liquidity grab or breakdown retest)"
+
+        # LATE: Trigger exists but validation failed
+        elif has_trigger and not trigger_validated:
+            setup_state = "LATE"
+            entry_ready = False
+            reason = f"Trigger detected but invalid: {trigger_validation_reason}"
+
+        # TRIGGERED: Trigger validated, checking risk
+        elif has_trigger and trigger_validated:
+            if risk_proximity in ["GOOD", "OK"]:
+                setup_state = "ENTRY_READY"  # Final go signal
+                entry_ready = True
+                reason = f"{trigger_type} at zone ${zone['midpoint']:.5f} - entry actionable now ({entry_window} window)"
+            else:
+                setup_state = "LATE"  # Trigger good but risk bad
+                entry_ready = False
+                reason = f"Trigger validated but risk too high ({distance_to_invalidation_pips:.1f} pips to stop, {risk_proximity} proximity)"
+
+        # Fallback
+        else:
+            setup_state = "WATCH"
+            entry_ready = False
+            reason = "Monitoring setup development"
 
         return {
-            "entry_state": new_state,
-            "entry_signal": entry_signal,
-            "state_description": description,
-            "time_in_state_minutes": round(time_in_state, 1)
+            "setup_state": setup_state,
+            "entry_ready": entry_ready,
+            "entry_window": entry_window,
+            "distance_to_invalidation": round(distance_to_invalidation_pips, 1),
+            "distance_to_zone": round(distance_to_zone, 1),
+            "trigger_time": trigger_info["trigger_time"],
+            "trigger_type": trigger_type,
+            "trigger_validated": trigger_validated,
+            "trigger_validation_reason": trigger_validation_reason,
+            "zone_time": None,  # TODO: Track when zone formed
+            "zone_price": round(zone["midpoint"], 5),
+            "invalidation_price": round(invalidation_level, 5),
+            "atr": round(atr, 5),
+            "reason": reason,
+            # Bias fields (deterministic)
+            "direction": direction,
+            "bias_source": bias_source,
+            "bias_conflict": bias_conflict,
+            "conflicting_structure": conflicting_structure
         }
 
     def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float) -> Dict[str, Any]:
