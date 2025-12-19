@@ -769,6 +769,8 @@ class BullishProTraderGBPUSD:
         # STEP 4: Determine if we have enough confluence to enter
         if total_score < 5:
             # Not enough confluence
+            # Add GATED SCORING for LOW_CONFLUENCE
+            gated_score = self._grade_setup(confluences)
             return {
                 "detected": True,
                 "pattern_type": "LOW_CONFLUENCE",
@@ -777,7 +779,12 @@ class BullishProTraderGBPUSD:
                 "confluences": confluences,
                 "total_score": total_score,
                 "structure": structure,
-                "description": f"⚠️ Low confluence (Score: {total_score}/5 minimum) - Need more confirmation"
+                "description": f"⚠️ Low confluence (Score: {total_score}/5 minimum) - Need more confirmation",
+                "has_location": gated_score["has_location"],
+                "has_trigger": gated_score["has_trigger"],
+                "has_confirmation": gated_score["has_confirmation"],
+                "grade": gated_score["grade"],
+                "tradable": gated_score["tradable"]
             }
 
         # STEP 4.5: SMART VALIDATION - Check price action, distance, and timing
@@ -847,6 +854,8 @@ class BullishProTraderGBPUSD:
         if validation_warnings:
             if adjusted_score < 5:
                 # Too many warnings - don't show as ready entry
+                # Add GATED SCORING for WAITING_CONFIRMATION
+                gated_score = self._grade_setup(confluences)
                 return {
                     "detected": True,
                     "pattern_type": "CONFLUENCE_DETECTED",
@@ -859,7 +868,12 @@ class BullishProTraderGBPUSD:
                     "structure": structure,
                     "validation_warnings": validation_warnings,
                     "candle_position": round(candle_position * 100, 1),
-                    "description": f"⏳ Setup detected ({total_score} points) but price action weak - WAIT FOR CONFIRMATION"
+                    "description": f"⏳ Setup detected ({total_score} points) but price action weak - WAIT FOR CONFIRMATION",
+                    "has_location": gated_score["has_location"],
+                    "has_trigger": gated_score["has_trigger"],
+                    "has_confirmation": gated_score["has_confirmation"],
+                    "grade": gated_score["grade"],
+                    "tradable": gated_score["tradable"]
                 }
 
         # STEP 5: We have confluence! Return the primary pattern
