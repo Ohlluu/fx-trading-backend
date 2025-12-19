@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Multi-Pair Trading Backend - v4.0
+Multi-Pair Trading Backend - v4.0.1
 Dual trading system: XAUUSD + GBPUSD Smart Confluence
 """
 
