@@ -630,9 +630,8 @@ class BullishProTraderGold:
         demand_setup = self._check_demand_zone(last_candles, h4_levels, current_price)
         liquidity_grab = self._check_liquidity_grab(last_candles, current_price, h4_levels, current_candle_low)  # Uses forming candle for real-time spike detection
 
-        # STEP 3: Calculate confluence score
-        confluences = []
-        total_score = 0
+        # STEP 3: Collect ALL detected confluences (RAW, before deduplication)
+        confluences_raw = []
 
         # Add structure score with VALIDATION
         # For BULLISH_BOS: Only count if price is still ABOVE the BOS level
@@ -645,28 +644,23 @@ class BullishProTraderGold:
 
             if not bos_invalidated:
                 # BOS is still valid - price holding above
-                confluences.append({
+                confluences_raw.append({
                     "type": "BULLISH_BOS",
                     "score": 2,
                     "description": structure["description"]
                 })
-                total_score += structure["score"]
             # else: BOS invalidated - don't add to confluences
-        else:
-            # Other structure types (CHOCH, etc.)
-            total_score += structure["score"]
 
         # Add liquidity grab (highest priority)
         # NO stability check needed - based on completed historical candles
         if liquidity_grab["detected"]:
-            confluences.append({
+            confluences_raw.append({
                 "type": "LIQUIDITY_GRAB",
                 "score": liquidity_grab["score"],  # Use actual score (4 or 3 based on recency)
                 "description": liquidity_grab["description"],
                 "grab_low": liquidity_grab.get("grab_low"),  # Pass actual low for SL calculation
                 "grab_level": liquidity_grab.get("grab_level")  # Pass grab level
             })
-            total_score += liquidity_grab["score"]
 
         # Add FVG
         # Only give points when price is ACTUALLY IN or REJECTED FROM the FVG zone
@@ -678,12 +672,11 @@ class BullishProTraderGold:
             # Only count if price is IN the FVG or has been strongly rejected from it
             # Don't give points when just "DETECTED" or "APPROACHING"
             if state == "IN_FVG" or strong_rejection:
-                confluences.append({
+                confluences_raw.append({
                     "type": "FVG",
                     "score": 3,
                     "description": f"FVG at ${fvg_setup.get('fvg_zone', {}).get('midpoint', 0):.2f}"
                 })
-                total_score += 3
             # else: FVG detected but price not there yet - don't give points
 
         # Add Order Block
@@ -703,12 +696,11 @@ class BullishProTraderGold:
             # Pattern shows immediately when detected (professional methodology)
             # Only check if OB is still valid (not violated)
             if not ob_violated:
-                confluences.append({
+                confluences_raw.append({
                     "type": "ORDER_BLOCK",
                     "score": 3,
                     "description": f"Order Block at ${ob_zone.get('midpoint', 0):.2f} (${ob_bottom:.2f}-${ob_top:.2f})"
                 })
-                total_score += 3
 
         # Add Breakout Retest
         # Only give points when retest is ACTUALLY HAPPENING, not just detected
@@ -718,12 +710,11 @@ class BullishProTraderGold:
             # Only count if retest is happening or rejection confirmed
             # Don't give points during "RETEST_WAITING" - that's too early
             if state in ["REJECTION_WAITING", "CONFIRMATION_WAITING"]:
-                confluences.append({
+                confluences_raw.append({
                     "type": "BREAKOUT_RETEST",
                     "score": 2,
                     "description": f"Breakout Retest at ${breakout_setup.get('key_level', 0):.2f}"
                 })
-                total_score += 2
             # else: Breakout detected but retest not happening yet - don't give points
 
         # Add Demand Zone
@@ -734,13 +725,16 @@ class BullishProTraderGold:
 
             # Only give confluence points when zone shows strong rejection
             if strong_rejection:
-                confluences.append({
+                confluences_raw.append({
                     "type": "DEMAND_ZONE",
                     "score": 2,
                     "description": f"Demand Zone at ${demand_setup.get('key_level', 0):.2f} (Strong Rejection: {strong_rejection})"
                 })
-                total_score += 2
             # else: Zone detected but no strong rejection yet - don't give points
+
+        # STEP 3.5: DEDUPLICATE to prevent double-counting correlated signals
+        # Example: BOS + BREAKOUT_RETEST from same structural break should not both count
+        confluences, total_score = self._dedupe_confluences(confluences_raw)
 
         # STEP 4: Determine if we have enough confluence to enter
         if total_score < 5:
@@ -917,6 +911,70 @@ class BullishProTraderGold:
             "tradable": grading["tradable"],
             "description": "Scanning for professional setups..."
         }
+
+    def _dedupe_confluences(self, confluences: List[Dict]) -> Tuple[List[Dict], int]:
+        """
+        Deduplicate correlated confluences to prevent double-counting.
+
+        Problem: Multiple detections can fire from same market event:
+        - BOS + BREAKOUT_RETEST (same structural break)
+        - ORDER_BLOCK + DEMAND_ZONE (same price level)
+
+        Solution: Group by correlation and take strongest per group.
+
+        Correlation Groups:
+        - STRUCTURE_SHIFT: BULLISH_BOS, BEARISH_BOS, BULLISH_CHOCH, BEARISH_CHOCH
+        - BREAKOUT_EVENT: BREAKOUT_RETEST, BREAKDOWN_RETEST
+        - LIQUIDITY_EVENT: LIQUIDITY_GRAB
+        - ZONE_LOCATION: ORDER_BLOCK, SUPPLY_ZONE, DEMAND_ZONE, FVG
+
+        Returns:
+            (deduplicated_confluences, total_score)
+        """
+        from collections import defaultdict
+
+        # Group confluences by correlation group
+        grouped = defaultdict(list)
+
+        for conf in confluences:
+            conf_type = conf.get("type", "")
+
+            # Assign to correlation group
+            if conf_type in ["BULLISH_BOS", "BEARISH_BOS", "BULLISH_CHOCH", "BEARISH_CHOCH"]:
+                group = "STRUCTURE_SHIFT"
+            elif conf_type in ["BREAKOUT_RETEST", "BREAKDOWN_RETEST"]:
+                group = "BREAKOUT_EVENT"
+            elif conf_type == "LIQUIDITY_GRAB":
+                group = "LIQUIDITY_EVENT"
+            elif conf_type in ["ORDER_BLOCK", "SUPPLY_ZONE", "DEMAND_ZONE", "FVG"]:
+                group = "ZONE_LOCATION"
+            else:
+                group = "OTHER"
+
+            # Add group field to confluence
+            conf["group"] = group
+            grouped[group].append(conf)
+
+        # Select strongest confluence per group (max score)
+        deduplicated = []
+        total_score = 0
+
+        for group, group_confs in grouped.items():
+            # Sort by score descending
+            sorted_confs = sorted(group_confs, key=lambda c: c.get("score", 0), reverse=True)
+
+            # Take strongest one
+            strongest = sorted_confs[0]
+            strongest["counted_for_score"] = True
+            deduplicated.append(strongest)
+            total_score += strongest.get("score", 0)
+
+            # Mark others as not counted
+            for conf in sorted_confs[1:]:
+                conf["counted_for_score"] = False
+                deduplicated.append(conf)
+
+        return deduplicated, total_score
 
     def _grade_setup(self, confluences: List[Dict]) -> Dict:
         """
