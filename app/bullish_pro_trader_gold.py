@@ -127,6 +127,13 @@ class BullishProTraderGold:
                 "confidence": h1_setup.get("confidence", None),
                 "structure": h1_setup.get("structure", {"structure_type": "NEUTRAL", "score": 0}),
 
+                # Gated scoring
+                "has_location": h1_setup.get("has_location", False),
+                "has_trigger": h1_setup.get("has_trigger", False),
+                "has_confirmation": h1_setup.get("has_confirmation", False),
+                "grade": h1_setup.get("grade", "WAIT"),
+                "tradable": h1_setup.get("tradable", False),
+
                 # Step-by-step breakdown
                 "setup_steps": self._build_setup_steps(h1_setup, current_price, current_candle, h1_data),
 
