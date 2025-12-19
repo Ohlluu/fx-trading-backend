@@ -898,17 +898,24 @@ class BullishProTraderGold:
             primary_setup["distance_to_zone"] = entry_state_data["distance_to_zone"]
             primary_setup["trigger_time"] = entry_state_data["trigger_time"]
             primary_setup["trigger_type"] = entry_state_data["trigger_type"]
+            primary_setup["trigger_validated"] = entry_state_data["trigger_validated"]
+            primary_setup["trigger_validation_reason"] = entry_state_data["trigger_validation_reason"]
             primary_setup["zone_time"] = entry_state_data["zone_time"]
             primary_setup["zone_price"] = entry_state_data["zone_price"]
             primary_setup["invalidation_price"] = entry_state_data["invalidation_price"]
             primary_setup["atr"] = entry_state_data["atr"]
             primary_setup["state_reason"] = entry_state_data["reason"]
+            # Bias fields (deterministic)
+            primary_setup["direction"] = entry_state_data["direction"]
+            primary_setup["bias_source"] = entry_state_data["bias_source"]
+            primary_setup["bias_conflict"] = entry_state_data["bias_conflict"]
+            primary_setup["conflicting_structure"] = entry_state_data["conflicting_structure"]
 
-            # Keep confidence for backward compatibility
+            # Keep confidence for backward compatibility (ENTRY_READY > others)
             if entry_state_data["setup_state"] == "ENTRY_READY":
-                primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME"
+                primary_setup["confidence"] = "⭐️⭐️⭐️ EXTREME"  # Most urgent
             elif entry_state_data["setup_state"] == "TRIGGERED":
-                primary_setup["confidence"] = "⭐️⭐️ HIGH"
+                primary_setup["confidence"] = "⭐️⭐️ HIGH"  # Trigger validated, checking
             elif entry_state_data["setup_state"] == "SETUP":
                 primary_setup["confidence"] = "⏳ FORMING (wait for trigger)"
             elif entry_state_data["setup_state"] == "WATCH":
@@ -953,11 +960,18 @@ class BullishProTraderGold:
             "distance_to_zone": entry_state_data["distance_to_zone"],
             "trigger_time": entry_state_data["trigger_time"],
             "trigger_type": entry_state_data["trigger_type"],
+            "trigger_validated": entry_state_data["trigger_validated"],
+            "trigger_validation_reason": entry_state_data["trigger_validation_reason"],
             "zone_time": entry_state_data["zone_time"],
             "zone_price": entry_state_data["zone_price"],
             "invalidation_price": entry_state_data["invalidation_price"],
             "atr": entry_state_data["atr"],
-            "state_reason": entry_state_data["reason"]
+            "state_reason": entry_state_data["reason"],
+            # Bias fields (deterministic)
+            "direction": entry_state_data["direction"],
+            "bias_source": entry_state_data["bias_source"],
+            "bias_conflict": entry_state_data["bias_conflict"],
+            "conflicting_structure": entry_state_data["conflicting_structure"]
         }
 
     def _dedupe_confluences(self, confluences: List[Dict]) -> Tuple[List[Dict], int]:
@@ -1070,7 +1084,9 @@ class BullishProTraderGold:
     def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> float:
         """Calculate Average True Range (ATR)"""
         if data is None or len(data) < period:
-            return 20.0  # Default fallback for Gold (20 pips)
+            # Default fallback for Gold: 20 pips * pip_size
+            # Gold pip_size = 1.0 (quotes like 2650.50)
+            return 20.0 * self.pip_size  # 20 pips = 20.0 for Gold
 
         high = data['high']
         low = data['low']
@@ -1165,7 +1181,7 @@ class BullishProTraderGold:
     def _get_trigger_info(self, confluences: List[Dict]) -> Dict:
         """
         Extract trigger information (type and timestamp)
-        Returns latest trigger if multiple exist
+        Priority: detected_at (immediate) > pattern_tracker (stable) > None (conservative)
         """
         trigger_types = ["LIQUIDITY_GRAB", "BREAKOUT_RETEST"]
         triggers = [c for c in confluences if c.get("type") in trigger_types]
@@ -1184,20 +1200,41 @@ class BullishProTraderGold:
 
         if liquidity_grabs:
             trigger = liquidity_grabs[0]
+            trigger_type = "LIQUIDITY_GRAB"
         elif breakout_retests:
             trigger = breakout_retests[0]
+            trigger_type = "BREAKOUT_RETEST"
         else:
             trigger = triggers[0]
+            trigger_type = trigger.get("type")
 
-        # Estimate trigger age (we don't have exact timestamp, estimate from detection)
-        # For now, assume trigger is recent (0-1 hour old)
-        # TODO: Add actual timestamp tracking in pattern detection
-        trigger_age_hours = 0.5  # Conservative estimate
+        # Try to get real timestamp
+        trigger_time = None
+        trigger_age_hours = None
+
+        # Priority 1: Check for detected_at (immediate triggers)
+        if "detected_at" in trigger:
+            trigger_time = trigger["detected_at"]
+            detected_dt = datetime.fromisoformat(trigger_time.replace('Z', '+00:00'))
+            age_seconds = (datetime.now(pytz.UTC) - detected_dt).total_seconds()
+            trigger_age_hours = age_seconds / 3600
+
+        # Priority 2: Check pattern_tracker for stable patterns
+        elif trigger_type in self.pattern_tracker and self.pattern_tracker[trigger_type]:
+            tracked = self.pattern_tracker[trigger_type]
+            if "first_seen" in tracked:
+                first_seen = tracked["first_seen"]
+                age_seconds = (datetime.now(pytz.UTC) - first_seen).total_seconds()
+                trigger_age_hours = age_seconds / 3600
+                trigger_time = first_seen.isoformat()
+
+        # Priority 3: No timestamp available - mark as None (conservative)
+        # Don't guess - caller will handle None appropriately
 
         return {
             "has_trigger": True,
-            "trigger_type": trigger.get("type"),
-            "trigger_time": datetime.now(pytz.UTC).isoformat(),  # Placeholder
+            "trigger_type": trigger_type,
+            "trigger_time": trigger_time,
             "trigger_age_hours": trigger_age_hours
         }
 
@@ -1275,30 +1312,66 @@ class BullishProTraderGold:
         trigger_age_hours = trigger_info["trigger_age_hours"]
         trigger_type = trigger_info["trigger_type"]
 
+        # Determine bias conflict (deterministic)
+        direction = "BULLISH"  # This trader's direction
+        bias_conflict = False
+        bias_source = "STRUCTURE_SHIFT"
+        conflicting_structure = None
+
+        if structure.get("structure_type") in ["BEARISH_CHOCH", "BEARISH_BOS"]:
+            bias_conflict = True
+            conflicting_structure = structure.get("structure_type")
+
         # Check trigger freshness
+        is_fresh = False
+        freshness_reason = None
+        trigger_validated = False
+        trigger_validation_reason = None
+
         if trigger_info["has_trigger"]:
             if trigger_type == "LIQUIDITY_GRAB":
                 freshness_max = 2.0  # 2 hours
             else:  # BREAKOUT_RETEST
                 freshness_max = 4.0  # 4 hours
 
-            is_fresh = trigger_age_hours is None or trigger_age_hours <= freshness_max
-        else:
-            is_fresh = False
+            # Handle None trigger_age_hours conservatively
+            if trigger_age_hours is None:
+                is_fresh = False
+                freshness_reason = "Trigger time unknown; skipping freshness gate"
+            elif trigger_age_hours <= freshness_max:
+                is_fresh = True
+                freshness_reason = f"Trigger fresh ({trigger_age_hours:.1f}h old, max {freshness_max}h)"
+            else:
+                is_fresh = False
+                freshness_reason = f"Trigger stale ({trigger_age_hours:.1f}h old, max {freshness_max}h)"
 
-        # STATE DETERMINATION LOGIC
+            # Validate trigger: fresh + near zone
+            if not is_fresh:
+                trigger_validated = False
+                trigger_validation_reason = freshness_reason
+            elif zone_proximity == "LATE":
+                trigger_validated = False
+                trigger_validation_reason = f"Trigger too far from zone ({distance_to_zone:.1f} pips away)"
+            else:
+                trigger_validated = True
+                trigger_validation_reason = f"Fresh {trigger_type} at zone ({zone_proximity} proximity)"
+        else:
+            trigger_validated = False
+            trigger_validation_reason = "No trigger detected"
+
+        # STATE DETERMINATION LOGIC (Clear separation)
+
         # NO_TRADE: No location
         if not has_location:
             setup_state = "NO_TRADE"
             entry_ready = False
             reason = "No valid location identified"
 
-        # WATCH: Location exists but not tradeable quality
-        # Check for conflicts or vetos
-        elif structure.get("structure_type") == "BEARISH_CHOCH":
+        # WATCH: Location exists but conflicts with bias
+        elif bias_conflict:
             setup_state = "WATCH"
             entry_ready = False
-            reason = "Location present but bearish CHoCH conflicts with bullish bias"
+            reason = f"Location present but {conflicting_structure} conflicts with {direction} bias"
 
         # SETUP: Location valid, waiting for trigger
         elif has_location and not has_trigger:
@@ -1306,31 +1379,25 @@ class BullishProTraderGold:
             entry_ready = False
             reason = f"Strong location at ${zone['midpoint']:.2f}; waiting for trigger (liquidity grab or retest)"
 
-        # TRIGGERED: Trigger exists, checking validation
-        elif has_trigger:
-            # Validate trigger (near zone + fresh)
-            trigger_validated = (zone_proximity in ["GOOD", "OK"]) and is_fresh
+        # LATE: Trigger exists but validation failed (not fresh OR too far from zone)
+        elif has_trigger and not trigger_validated:
+            setup_state = "LATE"
+            entry_ready = False
+            reason = f"Trigger detected but invalid: {trigger_validation_reason}"
 
-            if not trigger_validated:
-                # Trigger exists but invalid (stale or too far)
-                setup_state = "LATE"
-                entry_ready = False
-                if not is_fresh:
-                    reason = f"Trigger detected but stale ({trigger_age_hours:.1f}h ago)"
-                else:
-                    reason = f"Trigger detected but too far from zone ({distance_to_zone:.1f} pips away)"
-
-            # ENTRY_READY: Trigger validated + acceptable risk
-            elif entry_window in ["GOOD", "OK"]:
+        # TRIGGERED: Trigger validated (fresh + near zone), checking risk
+        elif has_trigger and trigger_validated:
+            # Now check risk proximity
+            if risk_proximity in ["GOOD", "OK"]:
+                # ENTRY_READY: Final go signal
                 setup_state = "ENTRY_READY"
                 entry_ready = True
-                reason = f"{trigger_type} at zone ${zone['midpoint']:.2f} - entry actionable now"
-
-            # LATE: Trigger validated but risk too high
+                reason = f"{trigger_type} at zone ${zone['midpoint']:.2f} - entry actionable now (risk: {risk_proximity})"
             else:
+                # LATE: Trigger good but risk bad
                 setup_state = "LATE"
                 entry_ready = False
-                reason = f"Trigger validated but entry too far from invalidation ({distance_to_invalidation:.1f} pips)"
+                reason = f"Trigger validated but risk too high ({distance_to_invalidation:.1f} pips from invalidation)"
 
         # Fallback
         else:
@@ -1346,11 +1413,18 @@ class BullishProTraderGold:
             "distance_to_zone": round(distance_to_zone, 1),
             "trigger_time": trigger_info["trigger_time"],
             "trigger_type": trigger_type,
+            "trigger_validated": trigger_validated,
+            "trigger_validation_reason": trigger_validation_reason,
             "zone_time": None,  # TODO: Track when zone formed
             "zone_price": round(zone["midpoint"], 2),
             "invalidation_price": round(invalidation_level, 2),
             "atr": round(atr, 1),
-            "reason": reason
+            "reason": reason,
+            # Bias fields (deterministic)
+            "direction": direction,
+            "bias_source": bias_source,
+            "bias_conflict": bias_conflict,
+            "conflicting_structure": conflicting_structure
         }
 
     def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 10) -> bool:
