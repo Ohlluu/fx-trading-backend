@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FX Trading Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .last-update {
+            font-size: 0.9rem;
+            margin-top: 10px;
+            opacity: 0.8;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .pair-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .pair-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+        }
+
+        .pair-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .pair-name {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #2d3748;
+        }
+
+        .pair-price {
+            font-size: 1.2rem;
+            color: #718096;
+        }
+
+        .trades-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .trade-box {
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .trade-box.buy {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .trade-box.sell {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .trade-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .trade-score {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .trade-status {
+            font-size: 0.85rem;
+            opacity: 0.95;
+            margin-top: 8px;
+        }
+
+        .confidence-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            margin-top: 8px;
+            background: rgba(255,255,255,0.2);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: white;
+            font-size: 1.2rem;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .refresh-btn {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            display: block;
+            margin: 20px auto;
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .score-high {
+            color: #48bb78;
+        }
+
+        .score-medium {
+            color: #ed8936;
+        }
+
+        .score-low {
+            color: #f56565;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>FX Trading Dashboard</h1>
+            <div class="subtitle">Live Trading Signals - Pro Trader System</div>
+            <div class="last-update" id="lastUpdate">Loading...</div>
+        </header>
+
+        <div id="dashboard" class="loading">
+            <div class="spinner"></div>
+            <div>Fetching latest trading signals...</div>
+        </div>
+
+        <button class="refresh-btn" onclick="loadDashboard()" style="display: none;" id="refreshBtn">
+            Refresh Data
+        </button>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        async function fetchPairData(pair) {
+            const pairLower = pair.toLowerCase().replace('/', '');
+            const endpoints = {
+                'xauusd': 'pro-trader-gold',
+                'eurusd': 'pro-trader-eurusd',
+                'gbpusd': 'pro-trader-gbpusd'
+            };
+
+            const endpoint = endpoints[pairLower];
+
+            try {
+                const [bullishRes, bearishRes] = await Promise.all([
+                    fetch(`${API_BASE}/api/${endpoint}/bullish`),
+                    fetch(`${API_BASE}/api/${endpoint}/bearish`)
+                ]);
+
+                const bullish = await bullishRes.json();
+                const bearish = await bearishRes.json();
+
+                return {
+                    pair: pair,
+                    bullish: bullish,
+                    bearish: bearish,
+                    price: bullish.current_price || bearish.current_price || 0
+                };
+            } catch (error) {
+                console.error(`Error fetching ${pair}:`, error);
+                return {
+                    pair: pair,
+                    error: error.message
+                };
+            }
+        }
+
+        function getScoreColor(score) {
+            if (score >= 7) return 'score-high';
+            if (score >= 5) return 'score-medium';
+            return 'score-low';
+        }
+
+        function getStatusText(score, tradable, tradeDecision) {
+            if (score >= 5 && tradable && tradeDecision === 'TRADE') {
+                return 'READY TO TRADE';
+            }
+            if (score >= 5) {
+                return 'SETUP FORMING';
+            }
+            return 'NO SIGNAL';
+        }
+
+        function formatPrice(price, pair) {
+            if (pair === 'XAU/USD') {
+                return `$${price.toFixed(2)}`;
+            }
+            return price.toFixed(5);
+        }
+
+        function createPairCard(data) {
+            if (data.error) {
+                return `
+                    <div class="pair-card">
+                        <div class="pair-header">
+                            <div class="pair-name">${data.pair}</div>
+                        </div>
+                        <div class="error">Error loading data: ${data.error}</div>
+                    </div>
+                `;
+            }
+
+            const buyScore = data.bullish?.total_score || 0;
+            const sellScore = data.bearish?.total_score || 0;
+
+            const buyTradable = data.bullish?.tradable || false;
+            const buyDecision = data.bullish?.trade_decision || 'SKIP';
+            const sellTradable = data.bearish?.tradable || false;
+            const sellDecision = data.bearish?.trade_decision || 'SKIP';
+
+            const buyStatus = getStatusText(buyScore, buyTradable, buyDecision);
+            const sellStatus = getStatusText(sellScore, sellTradable, sellDecision);
+
+            const buyConfidence = data.bullish?.confidence || '';
+            const sellConfidence = data.bearish?.confidence || '';
+
+            return `
+                <div class="pair-card">
+                    <div class="pair-header">
+                        <div class="pair-name">${data.pair}</div>
+                        <div class="pair-price">${formatPrice(data.price, data.pair)}</div>
+                    </div>
+                    <div class="trades-container">
+                        <div class="trade-box buy">
+                            <div class="trade-label">BUY Signal</div>
+                            <div class="trade-score ${getScoreColor(buyScore)}">${buyScore}</div>
+                            <div class="trade-status">${buyStatus}</div>
+                            ${buyConfidence ? `<div class="confidence-badge">${buyConfidence}</div>` : ''}
+                        </div>
+                        <div class="trade-box sell">
+                            <div class="trade-label">SELL Signal</div>
+                            <div class="trade-score ${getScoreColor(sellScore)}">${sellScore}</div>
+                            <div class="trade-status">${sellStatus}</div>
+                            ${sellConfidence ? `<div class="confidence-badge">${sellConfidence}</div>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadDashboard() {
+            const dashboardEl = document.getElementById('dashboard');
+            const refreshBtn = document.getElementById('refreshBtn');
+            const lastUpdateEl = document.getElementById('lastUpdate');
+
+            dashboardEl.innerHTML = `
+                <div class="spinner"></div>
+                <div>Fetching latest trading signals...</div>
+            `;
+            dashboardEl.className = 'loading';
+            refreshBtn.style.display = 'none';
+
+            try {
+                const pairs = ['XAU/USD', 'EUR/USD', 'GBP/USD'];
+                const results = await Promise.all(
+                    pairs.map(pair => fetchPairData(pair))
+                );
+
+                const html = results.map(data => createPairCard(data)).join('');
+
+                dashboardEl.innerHTML = html;
+                dashboardEl.className = 'dashboard-grid';
+                refreshBtn.style.display = 'block';
+
+                const now = new Date();
+                lastUpdateEl.textContent = `Last updated: ${now.toLocaleString()}`;
+
+            } catch (error) {
+                dashboardEl.innerHTML = `
+                    <div class="error">
+                        Failed to load dashboard: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Load dashboard on page load
+        loadDashboard();
+
+        // Auto-refresh every 2 minutes
+        setInterval(loadDashboard, 120000);
+    </script>
+</body>
+</html>

@@ -6,12 +6,14 @@ Dual trading system: XAUUSD + GBPUSD Smart Confluence
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 import pandas as pd
 import pytz
 import asyncio
+import os
 
 # Import both systems
 from .smart_confluence_system import (
@@ -49,6 +51,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # DUAL CACHE SYSTEM - One for each pair
 class MultiPairDataCache:
@@ -293,6 +300,14 @@ async def check_and_notify_setups(pair: str, bullish_data: Dict, bearish_data: D
         print(f"⚠️ {pair} Notification check error: {e}")
 
 # API ENDPOINTS
+
+@app.get("/")
+async def read_root():
+    """Serve the dashboard homepage"""
+    html_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(html_path):
+        return FileResponse(html_path)
+    return {"message": "FX Trading API - Dashboard not found. Access API at /docs"}
 
 @app.get("/api/xauusd/analysis")
 async def get_xauusd_analysis():
