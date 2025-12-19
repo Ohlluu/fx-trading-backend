@@ -1121,6 +1121,145 @@ class BearishProTraderGBPUSD:
             "tradable": grade in ["TRADE", "A+", "A", "B"]
         }
 
+    def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Average True Range (ATR)"""
+        if data is None or len(data) < period:
+            # Default fallback for GBP/USD: 20 pips * pip_size
+            # GBP/USD pip_size = 0.0001 (quotes like 1.2650)
+            return 20.0 * self.pip_size  # 20 pips = 0.0020 for GBP/USD
+
+        high = data['high']
+        low = data['low']
+        close = data['close']
+
+        # True Range calculation
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=period).mean().iloc[-1]
+
+        return float(atr) if not pd.isna(atr) else 20.0 * self.pip_size
+
+    def _get_zone_from_confluences(self, confluences: List[Dict], current_price: float) -> Dict:
+        """
+        Extract zone information from confluences
+        Returns zone with bounds if available, otherwise midpoint
+        """
+        # Find ZONE_LOCATION confluences that counted
+        zone_confs = [c for c in confluences
+                     if c.get("group") == "ZONE_LOCATION"
+                     and c.get("counted_for_score") == True]
+
+        if not zone_confs:
+            # Fallback: find any zone (even if not counted)
+            zone_confs = [c for c in confluences if c.get("group") == "ZONE_LOCATION"]
+
+        if not zone_confs:
+            # No zone found - use current price as fallback
+            return {
+                "top": current_price,
+                "bottom": current_price,
+                "midpoint": current_price
+            }
+
+        # Use first zone (or closest to price if multiple)
+        zone = zone_confs[0]
+
+        # Extract bounds with fallback
+        if "top" in zone and "bottom" in zone:
+            top = zone["top"]
+            bottom = zone["bottom"]
+            midpoint = (top + bottom) / 2
+        elif "price" in zone:
+            # Single price - create tiny band around it
+            price = zone["price"]
+            buffer = 0.5 * self.pip_size  # 0.5 pips buffer
+            top = price + buffer
+            bottom = price - buffer
+            midpoint = price
+        else:
+            # Fallback to current price
+            buffer = 0.5 * self.pip_size
+            top = current_price + buffer
+            bottom = current_price - buffer
+            midpoint = current_price
+
+        return {
+            "top": top,
+            "bottom": bottom,
+            "midpoint": midpoint
+        }
+
+    def _calculate_invalidation_level(self, zone: Dict, direction: str = "BEARISH") -> float:
+        """Calculate stop loss / invalidation level"""
+        if direction == "BULLISH":
+            # For bullish setups, stop goes below zone
+            return zone["bottom"]
+        else:
+            # For bearish setups, stop goes above zone
+            return zone["top"]
+
+    def _get_trigger_info(self, confluences: List[Dict]) -> Dict:
+        """
+        Extract trigger information (type and timestamp)
+        Priority: detected_at (immediate) > pattern_tracker (stable) > None (conservative)
+        """
+        # Find trigger confluences
+        trigger_types = ["LIQUIDITY_GRAB", "BREAKDOWN_RETEST"]
+        triggers = [c for c in confluences if c.get("type") in trigger_types]
+
+        if not triggers:
+            return {
+                "has_trigger": False,
+                "trigger_type": None,
+                "trigger_time": None,
+                "trigger_age_hours": None
+            }
+
+        # If multiple triggers, pick LIQUIDITY_GRAB first (higher priority)
+        liquidity_grabs = [t for t in triggers if t.get("type") == "LIQUIDITY_GRAB"]
+        breakdown_retests = [t for t in triggers if t.get("type") == "BREAKDOWN_RETEST"]
+
+        if liquidity_grabs:
+            trigger = liquidity_grabs[0]
+        elif breakdown_retests:
+            trigger = breakdown_retests[0]
+        else:
+            trigger = triggers[0]
+
+        # Try to get real timestamp (3-tier priority)
+        trigger_time = None
+        trigger_age_hours = None
+        trigger_type = trigger.get("type")
+
+        # Priority 1: Check for detected_at (immediate triggers)
+        if "detected_at" in trigger:
+            trigger_time = trigger["detected_at"]
+            detected_dt = datetime.fromisoformat(trigger_time.replace('Z', '+00:00'))
+            age_seconds = (datetime.now(pytz.UTC) - detected_dt).total_seconds()
+            trigger_age_hours = age_seconds / 3600
+
+        # Priority 2: Check pattern_tracker for stable patterns
+        elif trigger_type in self.pattern_tracker and self.pattern_tracker[trigger_type]:
+            tracked = self.pattern_tracker[trigger_type]
+            if "first_seen" in tracked:
+                first_seen = tracked["first_seen"]
+                age_seconds = (datetime.now(pytz.UTC) - first_seen).total_seconds()
+                trigger_age_hours = age_seconds / 3600
+                trigger_time = first_seen.isoformat()
+
+        # Priority 3: No timestamp available - mark as None (conservative)
+        # This will block ENTRY_READY until we have a real timestamp
+
+        return {
+            "has_trigger": True,
+            "trigger_type": trigger_type,
+            "trigger_time": trigger_time,
+            "trigger_age_hours": trigger_age_hours
+        }
+
     def _determine_entry_state(self, total_score: int, adjusted_score: int, validation_warnings: List[str],
                                candle_position: float, candle_is_bullish: bool) -> Dict[str, Any]:
         """
