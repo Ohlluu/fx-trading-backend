@@ -94,7 +94,7 @@ class BearishProTraderGBPUSD:
             # Analyze market structure across timeframes (using REAL data)
             daily_analysis = self._analyze_daily_trend(d1_data, current_price)
             h4_levels = self._identify_key_levels_h4(h4_data, current_price)
-            h1_setup = await self._detect_setup_pattern(h1_data, h4_levels, current_price)
+            h1_setup = await self._detect_setup_pattern(h1_data, h4_data, h4_levels, current_price)
 
             # CHECK IF SETUP TRIGGERED (5+ confluence)
             # If yes, lock it in as active trade
@@ -610,7 +610,7 @@ class BearishProTraderGBPUSD:
 
         return {"detected": False, "score": 0}
 
-    async def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
+    async def _detect_setup_pattern(self, h1_data: pd.DataFrame, h4_data: pd.DataFrame, h4_levels: Dict, current_price: float) -> Dict[str, Any]:
         """
         Detect which professional setup patterns are forming
 
@@ -913,6 +913,16 @@ class BearishProTraderGBPUSD:
                 structure=structure
             )
 
+            # Add STEP 4: TRADE-WORTHINESS GATING (NEW)
+            trade_worthiness = self._assess_trade_worthiness(
+                entry_state_data=entry_state_data,
+                confluences=confluences,
+                h4_data=h4_data,
+                current_price=current_price,
+                grading=gated_score,
+                direction="BEARISH"
+            )
+
             # Add state machine fields to response
             primary_setup["setup_state"] = entry_state_data["setup_state"]
             primary_setup["entry_ready"] = entry_state_data["entry_ready"]
@@ -933,6 +943,21 @@ class BearishProTraderGBPUSD:
             primary_setup["bias_source"] = entry_state_data["bias_source"]
             primary_setup["bias_conflict"] = entry_state_data["bias_conflict"]
             primary_setup["conflicting_structure"] = entry_state_data["conflicting_structure"]
+
+            # Step 4: Trade-Worthiness fields (NEW)
+            primary_setup["trade_worthy"] = trade_worthiness["trade_worthy"]
+            primary_setup["trade_decision"] = trade_worthiness["trade_decision"]
+            primary_setup["decision_reason"] = trade_worthiness["decision_reason"]
+            primary_setup["entry_price"] = trade_worthiness["entry_price"]
+            primary_setup["stop_price"] = trade_worthiness["stop_price"]
+            primary_setup["targets"] = trade_worthiness["targets"]
+            primary_setup["tp_source"] = trade_worthiness["tp_source"]
+            primary_setup["rr"] = trade_worthiness["rr"]
+            primary_setup["risk_distance"] = trade_worthiness["risk_distance"]
+            primary_setup["reward_distance_tp1"] = trade_worthiness["reward_distance_tp1"]
+            primary_setup["reward_distance_tp2"] = trade_worthiness["reward_distance_tp2"]
+            primary_setup["stop_atr_multiple"] = trade_worthiness["stop_atr_multiple"]
+            primary_setup["gates"] = trade_worthiness["gates"]
 
             # Confidence hierarchy (ENTRY_READY > TRIGGERED > SETUP > WATCH > NO_TRADE/LATE)
             if entry_state_data["setup_state"] == "ENTRY_READY":
@@ -959,6 +984,16 @@ class BearishProTraderGBPUSD:
             current_price=current_price,
             h1_data=last_candles,
             structure=structure
+        )
+
+        # Add STEP 4: TRADE-WORTHINESS GATING for SCANNING too
+        trade_worthiness = self._assess_trade_worthiness(
+            entry_state_data=entry_state_data,
+            confluences=confluences,
+            h4_data=h4_data,
+            current_price=current_price,
+            grading=gated_score,
+            direction="BEARISH"
         )
 
         return {
@@ -995,7 +1030,21 @@ class BearishProTraderGBPUSD:
             "direction": entry_state_data["direction"],
             "bias_source": entry_state_data["bias_source"],
             "bias_conflict": entry_state_data["bias_conflict"],
-            "conflicting_structure": entry_state_data["conflicting_structure"]
+            "conflicting_structure": entry_state_data["conflicting_structure"],
+            # Step 4: Trade-Worthiness fields (NEW)
+            "trade_worthy": trade_worthiness["trade_worthy"],
+            "trade_decision": trade_worthiness["trade_decision"],
+            "decision_reason": trade_worthiness["decision_reason"],
+            "entry_price": trade_worthiness["entry_price"],
+            "stop_price": trade_worthiness["stop_price"],
+            "targets": trade_worthiness["targets"],
+            "tp_source": trade_worthiness["tp_source"],
+            "rr": trade_worthiness["rr"],
+            "risk_distance": trade_worthiness["risk_distance"],
+            "reward_distance_tp1": trade_worthiness["reward_distance_tp1"],
+            "reward_distance_tp2": trade_worthiness["reward_distance_tp2"],
+            "stop_atr_multiple": trade_worthiness["stop_atr_multiple"],
+            "gates": trade_worthiness["gates"]
         }
 
     def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 10) -> bool:
@@ -1496,6 +1545,259 @@ class BearishProTraderGBPUSD:
             "bias_source": bias_source,
             "bias_conflict": bias_conflict,
             "conflicting_structure": conflicting_structure
+        }
+
+    def _find_targets(self, current_price: float, confluences: List[Dict],
+                     h4_data: pd.DataFrame, direction: str) -> List[Dict]:
+        """
+        Find target levels for Step 4 trade worthiness (BEARISH GBP/USD)
+
+        Returns ranked list of levels (nearest first) that serve as both:
+        - Potential take-profit targets
+        - Obstacles for feasibility checks
+
+        Order: opposing zones → swing extremes → ATR projection fallback
+        """
+        levels = []
+
+        # 1. Find opposing zones from confluences
+        # For shorts, find DEMAND zones below current price
+        opposing_types = ["DEMAND_ZONE", "ORDER_BLOCK"]
+
+        for conf in confluences:
+            if conf.get("type") not in opposing_types:
+                continue
+
+            # Extract level from zone
+            # For bearish: use top of demand zone (first support)
+            if "level" in conf:
+                level_price = conf["level"]
+            elif "bottom" in conf and "top" in conf:
+                level_price = conf["top"]  # Top of demand zone = first support hit
+            else:
+                continue
+
+            # Only consider levels below current price (bearish targets down)
+            if level_price >= current_price:
+                continue
+
+            distance = abs(current_price - level_price)
+            levels.append({
+                "price": level_price,
+                "distance": self._to_pips(distance),  # Convert to pips for GBP/USD
+                "source": "STRUCTURE",
+                "type": conf.get("type", "UNKNOWN")
+            })
+
+        # 2. Find swing extremes from H4 data
+        # For bearish: find swing lows (support levels below price)
+        if h4_data is not None and not h4_data.empty and len(h4_data) >= 5:
+            for i in range(2, len(h4_data) - 2):
+                current_low = h4_data.iloc[i]['low']
+
+                # Swing low: lower than 2 candles before and after
+                is_swing_low = (
+                    current_low < h4_data.iloc[i-1]['low'] and
+                    current_low < h4_data.iloc[i-2]['low'] and
+                    current_low < h4_data.iloc[i+1]['low'] and
+                    current_low < h4_data.iloc[i+2]['low']
+                )
+
+                if is_swing_low and current_low < current_price:
+                    distance = abs(current_price - current_low)
+                    levels.append({
+                        "price": current_low,
+                        "distance": self._to_pips(distance),
+                        "source": "SWING_LOW",
+                        "type": "H4_SWING"
+                    })
+
+        # Sort by distance (nearest first)
+        levels.sort(key=lambda x: x["distance"])
+
+        # Deduplicate within 3 pips for GBP/USD
+        deduped_levels = []
+        for level in levels:
+            is_duplicate = False
+            for existing in deduped_levels:
+                if abs(self._to_pips(level["price"] - existing["price"])) <= 3.0:
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                deduped_levels.append(level)
+
+        # Return max 3 targets
+        return deduped_levels[:3]
+
+    def _assess_trade_worthiness(self, entry_state_data: Dict, confluences: List[Dict],
+                                 h4_data: pd.DataFrame, current_price: float,
+                                 grading: Dict, direction: str) -> Dict:
+        """
+        Step 4: Trade-worthiness gating (R:R + stop sanity + target feasibility) (BEARISH GBP/USD)
+
+        Evaluates economic quality of ENTRY_READY setups:
+        - Gate 1: Stop Sanity (ATR-normalized stop width)
+        - Gate 2: Minimum R:R (economic justification)
+        - Gate 3: Target Feasibility (path-to-profit check)
+
+        Returns independent trade_worthy decision alongside Step 3 timing.
+        """
+        # Only assess when ENTRY_READY or TRIGGERED
+        if entry_state_data["setup_state"] not in ["ENTRY_READY", "TRIGGERED"]:
+            return {
+                "trade_worthy": False,
+                "trade_decision": "NOT_ASSESSED",
+                "decision_reason": f"Not assessing worthiness in {entry_state_data['setup_state']} state",
+                "entry_price": None,
+                "stop_price": None,
+                "targets": {"tp1": None, "tp2": None},
+                "tp_source": None,
+                "rr": {"to_tp1": None, "to_tp2": None},
+                "risk_distance": None,
+                "reward_distance_tp1": None,
+                "reward_distance_tp2": None,
+                "stop_atr_multiple": None,
+                "gates": {
+                    "stop_sanity_passed": False,
+                    "rr_passed": False,
+                    "feasibility_passed": False,
+                    "feasibility_details": None
+                }
+            }
+
+        # Use current_price for entry (CRITICAL: reality check, not zone midpoint)
+        entry_price = current_price
+        stop_price = entry_state_data["invalidation_price"]
+        atr = entry_state_data["atr"]
+        risk_distance = abs(entry_price - stop_price)
+        risk_distance_pips = self._to_pips(risk_distance)
+
+        # Gate 1: Stop Sanity (GBP/USD: <= 0.50 ATR)
+        stop_atr_multiple = risk_distance / atr if atr > 0 else 999
+        max_stop_atr = 0.50  # GBP/USD threshold
+        stop_sanity_passed = stop_atr_multiple <= max_stop_atr
+
+        # Find structural targets
+        structural_targets = self._find_targets(current_price, confluences, h4_data, direction)
+
+        # ATR projection fallback (STRICT requirements)
+        # Only if: grade="TRADE"/"A+" AND stop <= 0.425 ATR AND entry_window="GOOD"
+        can_use_atr_projection = (
+            grading["grade"] in ["TRADE", "A+"] and
+            stop_atr_multiple <= (max_stop_atr * 0.85) and  # 0.425 for GBP/USD
+            entry_state_data["entry_window"] == "GOOD"
+        )
+
+        # Build targets
+        tp1 = None
+        tp2 = None
+        tp_source = None
+
+        if len(structural_targets) >= 2:
+            # Use structural targets
+            tp1 = structural_targets[0]["price"]
+            tp2 = structural_targets[1]["price"]
+            tp_source = "STRUCTURE"
+        elif len(structural_targets) == 1:
+            # One structural target
+            tp1 = structural_targets[0]["price"]
+            # Try ATR projection for TP2 if eligible
+            if can_use_atr_projection:
+                tp2 = entry_price - (risk_distance * 2.5)
+                tp_source = "STRUCTURE_ATR_HYBRID"
+            else:
+                tp2 = None
+                tp_source = "STRUCTURE"
+        elif can_use_atr_projection:
+            # No structural targets but ATR projection eligible
+            tp1 = entry_price - (risk_distance * 1.5)
+            tp2 = entry_price - (risk_distance * 2.5)
+            tp_source = "ATR_PROJECTION"
+        else:
+            # No targets available
+            tp1 = None
+            tp2 = None
+            tp_source = "NONE"
+
+        # Calculate R:R
+        reward_distance_tp1 = abs(entry_price - tp1) if tp1 is not None else None
+        reward_distance_tp2 = abs(entry_price - tp2) if tp2 is not None else None
+        reward_distance_tp1_pips = self._to_pips(reward_distance_tp1) if reward_distance_tp1 is not None else None
+        reward_distance_tp2_pips = self._to_pips(reward_distance_tp2) if reward_distance_tp2 is not None else None
+
+        rr = {}
+        if reward_distance_tp1 is not None and risk_distance > 0:
+            rr["to_tp1"] = round(reward_distance_tp1 / risk_distance, 2)
+        else:
+            rr["to_tp1"] = None
+
+        if reward_distance_tp2 is not None and risk_distance > 0:
+            rr["to_tp2"] = round(reward_distance_tp2 / risk_distance, 2)
+        else:
+            rr["to_tp2"] = None
+
+        # Gate 2: Minimum R:R (GBP/USD: >= 1.6)
+        min_rr_required = 1.6
+        max_rr = max([r for r in rr.values() if r is not None], default=0)
+        rr_passed = max_rr >= min_rr_required
+
+        # Gate 3: Target Feasibility
+        # Check if any obstacle <= max(0.15*ATR, 0.30*stop_distance)
+        atr_pips = self._to_pips(atr)
+        feasibility_threshold = max(0.15 * atr_pips, 0.30 * risk_distance_pips)
+
+        # All levels (structural targets) are potential obstacles
+        obstacles = structural_targets
+
+        # Find closest obstacle distance
+        closest_obstacle = min([obs["distance"] for obs in obstacles], default=999999)
+
+        feasibility_passed = closest_obstacle > feasibility_threshold
+        feasibility_details = {
+            "closest_obstacle_distance": round(closest_obstacle, 1) if closest_obstacle < 999999 else None,
+            "threshold": round(feasibility_threshold, 1),
+            "passed": feasibility_passed
+        }
+
+        # Final decision: TAKE if all gates pass, PASS otherwise
+        all_gates_passed = stop_sanity_passed and rr_passed and feasibility_passed
+
+        if all_gates_passed:
+            trade_decision = "TAKE"
+            decision_reason = f"All gates passed: stop={stop_atr_multiple:.2f} ATR, R:R={max_rr:.1f}, clear path"
+        else:
+            trade_decision = "PASS"
+            failures = []
+            if not stop_sanity_passed:
+                failures.append(f"stop too wide ({stop_atr_multiple:.2f} > {max_stop_atr} ATR)")
+            if not rr_passed:
+                failures.append(f"R:R insufficient ({max_rr:.1f} < {min_rr_required})")
+            if not feasibility_passed:
+                failures.append(f"obstacle too close ({closest_obstacle:.1f} pips)")
+            decision_reason = "Gates failed: " + "; ".join(failures)
+
+        return {
+            "trade_worthy": all_gates_passed,
+            "trade_decision": trade_decision,
+            "decision_reason": decision_reason,
+            "entry_price": round(entry_price, 5),
+            "stop_price": round(stop_price, 5),
+            "targets": {
+                "tp1": round(tp1, 5) if tp1 is not None else None,
+                "tp2": round(tp2, 5) if tp2 is not None else None
+            },
+            "tp_source": tp_source,
+            "rr": rr,
+            "risk_distance": round(risk_distance_pips, 1),
+            "reward_distance_tp1": round(reward_distance_tp1_pips, 1) if reward_distance_tp1_pips is not None else None,
+            "reward_distance_tp2": round(reward_distance_tp2_pips, 1) if reward_distance_tp2_pips is not None else None,
+            "stop_atr_multiple": round(stop_atr_multiple, 2),
+            "gates": {
+                "stop_sanity_passed": stop_sanity_passed,
+                "rr_passed": rr_passed,
+                "feasibility_passed": feasibility_passed,
+                "feasibility_details": feasibility_details
+            }
         }
 
     def _check_breakout_retest(self, candles: pd.DataFrame, key_level: float, current_price: float) -> Dict[str, Any]:
