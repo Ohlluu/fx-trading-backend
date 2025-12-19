@@ -858,6 +858,14 @@ class BullishProTraderGold:
             primary_setup["validation_warnings"] = validation_warnings
             primary_setup["candle_position"] = round(candle_position * 100, 1)
 
+            # Add gated scoring
+            grading = self._grade_setup(confluences)
+            primary_setup["has_location"] = grading["has_location"]
+            primary_setup["has_trigger"] = grading["has_trigger"]
+            primary_setup["has_confirmation"] = grading["has_confirmation"]
+            primary_setup["grade"] = grading["grade"]
+            primary_setup["tradable"] = grading["tradable"]
+
             # ENTRY STATE SYSTEM: Replace confidence with clear entry states
             entry_state_data = self._determine_entry_state(
                 total_score=total_score,
@@ -885,6 +893,7 @@ class BullishProTraderGold:
             return primary_setup
 
         # Default: SCANNING
+        grading = self._grade_setup(confluences)
         return {
             "detected": True,
             "pattern_type": "SCANNING",
@@ -894,7 +903,55 @@ class BullishProTraderGold:
             "confluences": confluences,
             "total_score": total_score,
             "structure": structure,
+            "has_location": grading["has_location"],
+            "has_trigger": grading["has_trigger"],
+            "has_confirmation": grading["has_confirmation"],
+            "grade": grading["grade"],
+            "tradable": grading["tradable"],
             "description": "Scanning for professional setups..."
+        }
+
+    def _grade_setup(self, confluences: List[Dict]) -> Dict:
+        """
+        Grade setup based on category coverage (LOCATION, TRIGGER, CONFIRMATION)
+        Prevents false confidence from stacking wrong types of signals
+        """
+        # Categorize confluences
+        has_location = False
+        has_trigger = False
+        has_confirmation = False
+
+        location_types = ["ORDER_BLOCK", "DEMAND_ZONE"]
+        trigger_types = ["LIQUIDITY_GRAB", "BREAKOUT_RETEST"]
+        confirmation_types = ["BULLISH_BOS", "BULLISH_CHOCH"]
+
+        for conf in confluences:
+            conf_type = conf.get("type", "")
+            if conf_type in location_types:
+                has_location = True
+            if conf_type in trigger_types:
+                has_trigger = True
+            if conf_type in confirmation_types:
+                has_confirmation = True
+
+        # Calculate grade based on category coverage
+        if not has_location:
+            grade = "NO_TRADE"  # No location = never trade
+        elif has_location and has_trigger and has_confirmation:
+            grade = "A+"  # All 3 = best setup
+        elif has_location and has_trigger:
+            grade = "TRADE"  # Location + trigger = good setup
+        elif has_location and has_confirmation:
+            grade = "B"  # Location + confirmation = okay
+        else:
+            grade = "WAIT"  # Only location = wait for trigger
+
+        return {
+            "has_location": has_location,
+            "has_trigger": has_trigger,
+            "has_confirmation": has_confirmation,
+            "grade": grade,
+            "tradable": grade in ["TRADE", "A+", "A", "B"]
         }
 
     def _check_pattern_stability(self, pattern_name: str, pattern_data: Dict, stability_minutes: int = 10) -> bool:
